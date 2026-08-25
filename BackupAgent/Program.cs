@@ -1,9 +1,11 @@
 ﻿using System.IO.Compression;
 using System.Runtime.InteropServices;
+using System.Text;
+using FluentFTP;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 
-// Подтягиваем WinAPI функции для возможности скрытия окна
+
 [DllImport("kernel32.dll")]
 static extern IntPtr GetConsoleWindow();
 
@@ -12,14 +14,19 @@ static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
 const int SW_HIDE = 0;
 
+// Регистрируем поддержка кодировки Windows-1251 для .NET
+System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
+
+
 var configuration = new ConfigurationBuilder()
     .SetBasePath(Directory.GetCurrentDirectory())
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+    .AddUserSecrets<Program>(optional: true)
+    .AddEnvironmentVariables()
     .Build();
 
 bool hideConsole = bool.TryParse(configuration["AgentSettings:HideConsoleWindow"], out var hide) && hide;
 
-// Если в конфиге включено скрытие окна — прячем консоль сразу при старте
 if (hideConsole)
 {
     var handle = GetConsoleWindow();
@@ -31,12 +38,18 @@ string officeName = configuration["AgentSettings:OfficeName"] ?? "UnknownOffice"
 string pointCode = configuration["AgentSettings:PointCode"] ?? "OP1";
 string connectionString = configuration["AgentSettings:ConnectionString"] ?? @"Server=localhost;Database=master;Trusted_Connection=True;TrustServerCertificate=True;";
 string databaseName = configuration["AgentSettings:DatabaseName"] ?? "Exchange";
-string targetRootPath = configuration["AgentSettings:TargetPath"] ?? @"C:\FTP\A8pro\Backups_V2";
+
+// Настройки FTP
+string ftpHost = configuration["AgentSettings:FtpHost"] ?? "ftp.a8pro.kz";
+string ftpUser = configuration["AgentSettings:FtpUser"] ?? "A8pro";
+string ftpPassword = Environment.GetEnvironmentVariable("FTP_PASSWORD")
+    ?? configuration["AgentSettings:FtpPassword"]
+    ?? "";
+string ftpRootFolder = configuration["AgentSettings:FtpRootFolder"] ?? "Backups_V2";
 
 string tempBackupFolder = @"C:\BackupTemp";
 Directory.CreateDirectory(tempBackupFolder);
 
-// Отрисовываем крупный баннер предупреждения, если консоль видна
 if (!hideConsole)
 {
     Console.ForegroundColor = ConsoleColor.Yellow;
@@ -56,10 +69,6 @@ string timestamp = DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
 string tempBakPath = Path.Combine(tempBackupFolder, $"{databaseName}_{timestamp}.bak");
 string archiveFileName = $"{officeName}_{pointCode}_{timestamp}.zip";
 string tempZipPath = Path.Combine(tempBackupFolder, archiveFileName);
-
-string destinationDirectory = Path.Combine(targetRootPath, cityName, officeName);
-Directory.CreateDirectory(destinationDirectory);
-string destinationZipPath = Path.Combine(destinationDirectory, archiveFileName);
 
 try
 {
@@ -81,7 +90,7 @@ try
         }
     }
 
-    Console.WriteLine($"[Success] Файл .bak сформирован по адресу: {tempBakPath}\n");
+    Console.WriteLine($"[Success] Файл .bak сформирован локально во временной папке.\n");
 
     // ==========================================
     // ШАГ 2: Локальное сжатие (.bak -> .zip)
@@ -119,41 +128,54 @@ try
 
     if (!hideConsole) Console.WriteLine("\n[Success] Сжатие завершено!\n");
 
+    // Удаляем локальный .bak сразу после сжатия
     if (File.Exists(tempBakPath)) File.Delete(tempBakPath);
 
     // ==========================================
-    // ШАГ 3: Передача (.zip в целевую папку)
+    // ШАГ 3: Передача архива по FTP
     // ==========================================
     var zipFileInfo = new FileInfo(tempZipPath);
     long totalZipBytes = zipFileInfo.Length;
 
-    Console.WriteLine($"[3/3] Передача архива ({totalZipBytes / 1024.0 / 1024.0:F1} МБ)...");
+    Console.WriteLine($"[3/3] Подключение к FTP ({ftpHost}) и передача архива ({totalZipBytes / 1024.0 / 1024.0:F1} МБ)...");
 
-    using (var sourceStream = File.OpenRead(tempZipPath))
-    using (var destinationStream = File.Create(destinationZipPath))
+    using (var ftpClient = new FtpClient(ftpHost, ftpUser, ftpPassword))
     {
-        byte[] buffer = new byte[81920];
-        long copiedBytes = 0;
-        int bytesRead;
+        //// Включаем UTF-8 для поддержки русского языка (Алматы) в путях FTP
+        //ftpClient.Encoding = Encoding.UTF8;
 
-        while ((bytesRead = sourceStream.Read(buffer, 0, buffer.Length)) > 0)
+        // Задаем кодировку Windows-1251 для корректной поддержки кириллицы на Windows FTP
+        ftpClient.Encoding = Encoding.GetEncoding("windows-1251");
+
+        ftpClient.Connect();
+
+        // Путь на FTP: /Backups_V2/Алматы/SilkWay
+        string remoteDirectory = $"/{ftpRootFolder}/{cityName}/{officeName}";
+        ftpClient.CreateDirectory(remoteDirectory);
+
+        string remoteFilePath = $"{remoteDirectory}/{archiveFileName}";
+
+        Action<FtpProgress> progress = p =>
         {
-            destinationStream.Write(buffer, 0, bytesRead);
-            copiedBytes += bytesRead;
-
             if (!hideConsole)
             {
-                DrawProgressBar("Отправка", copiedBytes, totalZipBytes);
+                DrawProgressBar("Отправка FTP", (long)p.TransferredBytes, totalZipBytes);
             }
-        }
+        };
+
+        // Загрузка файла
+        ftpClient.UploadFile(tempZipPath, remoteFilePath, FtpRemoteExists.Overwrite, true, FtpVerify.None, progress);
+
+        ftpClient.Disconnect();
     }
 
-    if (!hideConsole) Console.WriteLine("\n[Success] Передача завершена!\n");
+    if (!hideConsole) Console.WriteLine("\n[Success] Передача на FTP завершена!\n");
 
+    // Удаляем локальный временный .zip после успешной отправки
     if (File.Exists(tempZipPath)) File.Delete(tempZipPath);
 
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine($"\n[COMPLETE] Бэкап успешно доставлен: {destinationZipPath}");
+    Console.WriteLine($"[COMPLETE] Бэкап успешно доставлен на FTP: {ftpHost}/{ftpRootFolder}/{cityName}/{officeName}/{archiveFileName}");
     Console.ResetColor();
 
     if (!hideConsole)
@@ -166,6 +188,10 @@ catch (Exception ex)
 {
     Console.ForegroundColor = ConsoleColor.Red;
     Console.WriteLine($"\n[Error] Ошибка выполнения: {ex.Message}");
+    if (ex.InnerException != null)
+    {
+        Console.WriteLine($"[Error Detail] {ex.InnerException.Message}");
+    }
     Console.ResetColor();
 
     if (!hideConsole)
