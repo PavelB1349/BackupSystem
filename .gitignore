@@ -1,0 +1,30 @@
+# Скомпилированные файлы и папки
+bin/
+obj/
+*.user
+*.userossc
+
+# Настройки Visual Studio и кэш
+.vs/
+.idea/
+
+# Локальные базы данных
+*.db
+*.db-shm
+*.db-wal
+backups.db
+
+# Публикации и пакеты
+*.nupkg
+publish/
+
+# Файлы локальных конфигураций с реальными секретами
+appsettings.Development.json
+appsettings.Local.json
+*.secrets.json
+.env
+
+# Файлы ключей и сертификатов
+*.pfx
+*.key
+*.pem

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/Элементы решения/">
+    <File Path=".gitignore" />
+  </Folder>
+  <Project Path="BackupAgent/BackupAgent.csproj" />
+  <Project Path="BackupServer.Api/BackupServer.Api.csproj" />
+  <Project Path="BackupServer.Core/BackupServer.Core.csproj" />
+  <Project Path="BackupServer.Infrastructure/BackupServer.Infrastructure.csproj" />
+</Solution>
