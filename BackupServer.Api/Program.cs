@@ -1,4 +1,6 @@
+using BackupServer.Api.BackgroundServices;
 using BackupServer.Infrastructure.Persistence;
+using BackupServer.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,7 +15,8 @@ builder.Services.AddControllers();
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
-
+builder.Services.AddScoped<FileScannerService>();
+builder.Services.AddHostedService<FileScannerWorker>();
 
 var app = builder.Build();
 
