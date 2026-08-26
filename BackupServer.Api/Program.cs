@@ -1,4 +1,5 @@
 using BackupServer.Api.BackgroundServices;
+using BackupServer.Api.Configuration;
 using BackupServer.Infrastructure.Persistence;
 using BackupServer.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
@@ -17,6 +18,7 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddScoped<FileScannerService>();
 builder.Services.AddHostedService<FileScannerWorker>();
+builder.Services.AddHostedService<BackupRetentionWorker>();
 
 var app = builder.Build();
 
@@ -30,6 +32,9 @@ app.UseHttpsRedirection();
 
 app.UseAuthorization();
 
+app.UseDefaultFiles(); // Ищет index.html по умолчанию
+app.UseStaticFiles();  // Разрешает отдавать HTML/JS/CSS из папки wwwroot
+
 app.MapControllers();
 
 // Автоматическое создание/обновление базы данных при старте
@@ -38,5 +43,6 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.Migrate();
 }
+DynamicSettings.Init(app.Services.GetRequiredService<IConfiguration>());
 
 app.Run();

@@ -1,0 +1,695 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мониторинг Бэкапов 1С | A8pro</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f4f6f9;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .card-stat {
+            border: 2px solid transparent;
+            border-radius: 12px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+            .card-stat:hover {
+                transform: translateY(-3px);
+                box-shadow: 0 6px 15px rgba(0,0,0,0.08) !important;
+            }
+
+            .card-stat.active-filter {
+                border-color: #0d6efd !important;
+                background-color: #f0f7ff !important;
+            }
+
+        .table-container {
+            background: #fff;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+
+        .badge-success-custom {
+            background-color: #d1e7dd;
+            color: #0f5132;
+        }
+
+        .badge-danger-custom {
+            background-color: #f8d7da;
+            color: #842029;
+        }
+
+        .badge-warning-custom {
+            background-color: #fff3cd;
+            color: #664d03;
+        }
+
+        .badge-secondary-custom {
+            background-color: #e2e3e5;
+            color: #41464b;
+        }
+
+        .nav-pills .nav-link.active {
+            background-color: #0d6efd;
+            border-radius: 8px;
+        }
+
+        .nav-pills .nav-link {
+            color: #495057;
+            font-weight: 600;
+        }
+
+        th.sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+
+            th.sortable:hover {
+                background-color: #e9ecef;
+            }
+
+        tr.clickable-row {
+            cursor: pointer;
+        }
+
+            tr.clickable-row:hover {
+                background-color: #f1f5f9 !important;
+            }
+    </style>
+</head>
+<body>
+
+    <!-- Навбар -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark shadow-sm py-3 mb-4">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand d-flex align-items-center gap-2" href="#">
+                <i class="fa-solid fa-server text-primary fs-4"></i>
+                <span>A8pro Backup Server</span>
+            </a>
+            <div class="d-flex align-items-center gap-2 text-light">
+                <button id="btnScanFtp" class="btn btn-warning btn-sm fw-semibold" onclick="triggerFtpScan()">
+                    <i class="fa-solid fa-magnifying-glass-chart me-1"></i> Сканировать FTP
+                </button>
+                <button id="btnCleanupFtp" class="btn btn-outline-danger btn-sm fw-semibold" onclick="triggerFtpRetention()">
+                    <i class="fa-solid fa-trash-can me-1"></i> Очистка старых копий
+                </button>
+                <button class="btn btn-outline-light btn-sm" onclick="openSettingsModal()">
+                    <i class="fa-solid fa-gear me-1"></i> Настройки
+                </button>
+                <button class="btn btn-primary btn-sm" onclick="loadDashboard()">
+                    <i class="fa-solid fa-rotate-right me-1"></i> Обновить
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4">
+
+        <!-- Карточки статистики -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card card-stat bg-white shadow-sm p-3" id="cardStatAll" onclick="filterByCard('')">
+                    <div class="d-flex align-items-center">
+                        <div class="rounded-circle bg-primary bg-opacity-10 p-3 text-primary me-3">
+                            <i class="fa-solid fa-cash-register fs-3"></i>
+                        </div>
+                        <div>
+                            <div class="text-muted small fw-semibold">ВСЕГО ТОЧЕК</div>
+                            <div class="fs-3 fw-bold text-dark" id="statTotalPoints">0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-stat bg-white shadow-sm p-3" id="cardStatSuccess" onclick="filterByCard('Success')">
+                    <div class="d-flex align-items-center">
+                        <div class="rounded-circle bg-success bg-opacity-10 p-3 text-success me-3">
+                            <i class="fa-solid fa-circle-check fs-3"></i>
+                        </div>
+                        <div>
+                            <div class="text-muted small fw-semibold">СДАНО В СРОК</div>
+                            <div class="fs-3 fw-bold text-success" id="statBackupsToday">0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-stat bg-white shadow-sm p-3" id="cardStatMissing" onclick="filterByCard('Missing')">
+                    <div class="d-flex align-items-center">
+                        <div class="rounded-circle bg-warning bg-opacity-10 p-3 text-warning me-3">
+                            <i class="fa-solid fa-clock-rotate-left fs-3"></i>
+                        </div>
+                        <div>
+                            <div class="text-muted small fw-semibold">ПРОПУЩЕНО / ПРОСРОЧЕНО</div>
+                            <div class="fs-3 fw-bold text-warning" id="statMissingToday">0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-stat bg-white shadow-sm p-3" id="cardStatError" onclick="filterByCard('Error')">
+                    <div class="d-flex align-items-center">
+                        <div class="rounded-circle bg-danger bg-opacity-10 p-3 text-danger me-3">
+                            <i class="fa-solid fa-triangle-exclamation fs-3"></i>
+                        </div>
+                        <div>
+                            <div class="text-muted small fw-semibold">ОШИБКИ БЭКАПОВ</div>
+                            <div class="fs-3 fw-bold text-danger" id="statErrorsToday">0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Переключение вкладок -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <ul class="nav nav-pills" id="pills-tab" role="tablist">
+                <li class="nav-item">
+                    <button class="nav-link active" id="tab-status-btn" data-bs-toggle="pill" data-bs-target="#tab-status" type="button">
+                        <i class="fa-solid fa-list-check me-1"></i> Состояние точек
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" id="tab-logs-btn" data-bs-toggle="pill" data-bs-target="#tab-logs" type="button">
+                        <i class="fa-solid fa-file-lines me-1"></i> Детальный журнал бэкапов
+                    </button>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Контент Вкладок -->
+        <div class="tab-content">
+            <!-- Вкладка 1 -->
+            <div class="tab-pane fade show active" id="tab-status" role="tabpanel">
+                <div class="table-container">
+                    <div class="row g-2 mb-3 align-items-center">
+                        <div class="col-md-5">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-white"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
+                                <input type="text" id="liveSearchInput" class="form-control form-control-sm" placeholder="Живой поиск (город, обменник, касса)..." oninput="applyPointsFilter()">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <select id="pointCitySelect" class="form-select form-select-sm" onchange="applyPointsFilter()">
+                                <option value="">Все города</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select id="pointStatusSelect" class="form-select form-select-sm" onchange="applyPointsFilter()">
+                                <option value="">Все статусы</option>
+                                <option value="Success">🟢 Сдан в срок</option>
+                                <option value="Missing">🟡 Пропущен / Просрочен</option>
+                                <option value="Error">🔴 Ошибка</option>
+                                <option value="Closed">⚪ Закрыта (>30 дн)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-1 text-end">
+                            <button class="btn btn-outline-secondary btn-sm w-100" onclick="resetPointsFilter()">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="sortable" onclick="sortPointsTable('cityName')">Город <span id="sort_cityName"></span></th>
+                                <th class="sortable" onclick="sortPointsTable('officeName')">Обменник <span id="sort_officeName"></span></th>
+                                <th class="sortable" onclick="sortPointsTable('pointCode')">Касса <span id="sort_pointCode"></span></th>
+                                <th class="sortable" onclick="sortPointsTable('lastBackupTime')">Последняя копия <span id="sort_lastBackupTime"></span></th>
+                                <th class="sortable" onclick="sortPointsTable('lastFileSize')">Размер <span id="sort_lastFileSize"></span></th>
+                                <th class="sortable" onclick="sortPointsTable('status')">Статус <span id="sort_status"></span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="pointsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Вкладка 2 -->
+            <div class="tab-pane fade" id="tab-logs" role="tabpanel">
+                <div class="table-container">
+                    <div class="row g-2 mb-3 align-items-center">
+                        <div class="col-md-4">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-white"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
+                                <input type="text" id="logSearchInput" class="form-control form-control-sm" placeholder="Поиск по файлу, обменнику, кассе..." oninput="loadLogs()">
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <select id="logCitySelect" class="form-select form-select-sm" onchange="loadLogs()">
+                                <option value="">Все города</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <select id="logStatusSelect" class="form-select form-select-sm" onchange="loadLogs()">
+                                <option value="">Все статусы</option>
+                                <option value="Success">Success (Успешно)</option>
+                                <option value="Corrupted">Corrupted (Повреждён)</option>
+                                <option value="Error">Error (Ошибка)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 text-end d-flex gap-1">
+                            <button class="btn btn-primary btn-sm flex-grow-1" onclick="loadLogs()"><i class="fa-solid fa-filter me-1"></i> Найти</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="resetLogsFilter()"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="sortable" onclick="sortLogsTable('cityName')">Город <span id="sort_log_cityName"></span></th>
+                                <th class="sortable" onclick="sortLogsTable('officeName')">Обменник / Касса <span id="sort_log_officeName"></span></th>
+                                <th class="sortable" onclick="sortLogsTable('fileName')">Имя файла <span id="sort_log_fileName"></span></th>
+                                <th class="sortable" onclick="sortLogsTable('fileSizeBytes')">Размер <span id="sort_log_fileSizeBytes"></span></th>
+                                <th class="sortable" onclick="sortLogsTable('fileCreatedAt')">Дата создания <span id="sort_log_fileCreatedAt"></span></th>
+                                <th class="sortable" onclick="sortLogsTable('status')">Статус <span id="sort_log_status"></span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно: История кассы -->
+    <div class="modal fade" id="pointHistoryModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title fw-bold" id="pointHistoryModalTitle">История бэкапов кассы</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Имя файла</th>
+                                <th>Размер</th>
+                                <th>Дата создания</th>
+                                <th>Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pointHistoryTableBody">
+                            <tr><td colspan="4" class="text-center text-muted py-3">Загрузка истории...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно: Настройки -->
+    <div class="modal fade" id="settingsModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title fw-bold"><i class="fa-solid fa-sliders me-2"></i>Настройки мониторинга</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Допустимая просрочка (в днях):</label>
+                        <input type="number" id="settingOverdueDays" class="form-control" min="1" max="10">
+                        <div class="form-text">Спустя столько дней бэкап переходит в статус «Пропущен / Просрочен».</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Порог статуса «Закрыта» (в днях):</label>
+                        <input type="number" id="settingClosedDays" class="form-control" min="5" max="365">
+                        <div class="form-text">Если от точки нет бэкапов больше этого срока, она помечается как закрытая.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Хранить бэкапов на точку (ротация):</label>
+                        <input type="number" id="settingMaxBackups" class="form-control" min="1" max="20">
+                        <div class="form-text">Максимальное количество копий на FTP для одной кассы (лишние старые удаляются).</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="saveSettings()">Сохранить изменения</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let globalPointsData = [];
+        let globalLogsData = [];
+        let currentPointsSortCol = 'lastBackupTime';
+        let currentPointsSortAsc = false;
+        let currentLogsSortCol = 'fileCreatedAt';
+        let currentLogsSortAsc = false;
+
+        document.addEventListener("DOMContentLoaded", () => {
+            loadDashboard();
+        });
+
+        async function triggerFtpScan() {
+            const btn = document.getElementById("btnScanFtp");
+            const originalText = btn.innerHTML;
+
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span> Сканирование...`;
+
+            try {
+                const res = await fetch("/api/dashboard/scan", { method: "POST" });
+                const data = await res.json();
+
+                if (res.ok) {
+                    alert(data.message || "Сканирование FTP успешно завершено!");
+                    await loadDashboard();
+                } else {
+                    alert("Ошибка сканирования: " + (data.message || "Неизвестная ошибка"));
+                }
+            } catch (err) {
+                console.error("Ошибка сканирования FTP:", err);
+                alert("Ошибка при вызове сканера FTP");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        async function loadDashboard() {
+            loadStats();
+            await loadPointsStatus();
+            loadLogs();
+        }
+
+        async function loadStats() {
+            try {
+                const res = await fetch("/api/dashboard/stats");
+                const data = await res.json();
+                document.getElementById("statTotalPoints").innerText = data.totalPoints;
+                document.getElementById("statBackupsToday").innerText = data.backupsToday;
+                document.getElementById("statMissingToday").innerText = data.missingToday;
+                document.getElementById("statErrorsToday").innerText = data.errorsToday;
+            } catch (err) { console.error(err); }
+        }
+
+        async function loadPointsStatus() {
+            try {
+                const res = await fetch("/api/dashboard/points");
+                globalPointsData = await res.json();
+                populateCityDropdowns(globalPointsData);
+                applyPointsFilter();
+            } catch (err) { console.error(err); }
+        }
+
+        function populateCityDropdowns(data) {
+            const cities = [...new Set(data.map(p => p.cityName))].sort();
+            const citySelect1 = document.getElementById("pointCitySelect");
+            const citySelect2 = document.getElementById("logCitySelect");
+            const sel1Val = citySelect1.value;
+            const sel2Val = citySelect2.value;
+
+            let optionsHtml = `<option value="">Все города (${cities.length})</option>`;
+            cities.forEach(city => { optionsHtml += `<option value="${city}">${city}</option>`; });
+
+            citySelect1.innerHTML = optionsHtml;
+            citySelect2.innerHTML = optionsHtml;
+            citySelect1.value = sel1Val;
+            citySelect2.value = sel2Val;
+        }
+
+        function filterByCard(status) {
+            document.querySelectorAll('.card-stat').forEach(c => c.classList.remove('active-filter'));
+            if (status === 'Success') document.getElementById('cardStatSuccess').classList.add('active-filter');
+            else if (status === 'Missing') document.getElementById('cardStatMissing').classList.add('active-filter');
+            else if (status === 'Error') document.getElementById('cardStatError').classList.add('active-filter');
+            else document.getElementById('cardStatAll').classList.add('active-filter');
+
+            document.getElementById("pointStatusSelect").value = status;
+            applyPointsFilter();
+        }
+
+        function applyPointsFilter() {
+            const searchText = document.getElementById("liveSearchInput").value.toLowerCase().trim();
+            const selectedCity = document.getElementById("pointCitySelect").value;
+            const selectedStatus = document.getElementById("pointStatusSelect").value;
+
+            let filtered = globalPointsData.filter(p => {
+                const matchesSearch = !searchText ||
+                    p.cityName.toLowerCase().includes(searchText) ||
+                    p.officeName.toLowerCase().includes(searchText) ||
+                    p.pointCode.toLowerCase().includes(searchText);
+
+                const matchesCity = !selectedCity || p.cityName === selectedCity;
+                const matchesStatus = !selectedStatus || p.status === selectedStatus;
+                return matchesSearch && matchesCity && matchesStatus;
+            });
+
+            filtered.sort((a, b) => {
+                let valA = a[currentPointsSortCol] ?? '';
+                let valB = b[currentPointsSortCol] ?? '';
+                if (typeof valA === 'string') valA = valA.toLowerCase();
+                if (typeof valB === 'string') valB = valB.toLowerCase();
+                if (valA < valB) return currentPointsSortAsc ? -1 : 1;
+                if (valA > valB) return currentPointsSortAsc ? 1 : -1;
+                return 0;
+            });
+
+            updateSortIcons('sort_', currentPointsSortCol, currentPointsSortAsc);
+            renderPointsTable(filtered);
+        }
+
+        function sortPointsTable(column) {
+            if (currentPointsSortCol === column) currentPointsSortAsc = !currentPointsSortAsc;
+            else { currentPointsSortCol = column; currentPointsSortAsc = true; }
+            applyPointsFilter();
+        }
+
+        function resetPointsFilter() {
+            document.getElementById("liveSearchInput").value = "";
+            document.getElementById("pointCitySelect").value = "";
+            document.getElementById("pointStatusSelect").value = "";
+            document.querySelectorAll('.card-stat').forEach(c => c.classList.remove('active-filter'));
+            applyPointsFilter();
+        }
+
+        function renderPointsTable(data) {
+            const tbody = document.getElementById("pointsTableBody");
+            tbody.innerHTML = "";
+
+            if (data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">Точки не найдены</td></tr>`;
+                return;
+            }
+
+            data.forEach(p => {
+                const lastTime = p.lastBackupTime ? new Date(p.lastBackupTime).toLocaleString() : "Никогда";
+                const sizeMb = p.lastFileSize ? (p.lastFileSize / 1024 / 1024).toFixed(1) + " MB" : "—";
+                let badgeClass = "badge-warning-custom";
+                let statusText = "Пропущен";
+
+                if (p.status === "Success") { badgeClass = "badge-success-custom"; statusText = "Сдан в срок"; }
+                else if (p.status === "Error") { badgeClass = "badge-danger-custom"; statusText = "Ошибка бэкапа"; }
+                else if (p.status === "Closed") { badgeClass = "badge-secondary-custom"; statusText = "Закрыта (>30 дн)"; }
+
+                tbody.innerHTML += `
+                        <tr class="clickable-row" onclick="openPointHistoryModal('${p.cityName}', '${p.officeName}', '${p.pointCode}')" title="Нажмите, чтобы открыть историю кассы">
+                            <td><strong>${p.cityName}</strong></td>
+                            <td>${p.officeName}</td>
+                            <td><span class="badge bg-secondary">${p.pointCode}</span></td>
+                            <td>${lastTime}</td>
+                            <td>${sizeMb}</td>
+                            <td><span class="badge ${badgeClass} px-3 py-2">${statusText}</span></td>
+                        </tr>
+                    `;
+            });
+        }
+
+        async function openPointHistoryModal(city, office, pointCode) {
+            document.getElementById("pointHistoryModalTitle").innerText = `История кассы: ${city} / ${office} [${pointCode}]`;
+            const tbody = document.getElementById("pointHistoryTableBody");
+            tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-3">Загрузка истории...</td></tr>`;
+
+            const modal = new bootstrap.Modal(document.getElementById('pointHistoryModal'));
+            modal.show();
+
+            try {
+                const res = await fetch(`/api/dashboard/logs?city=${encodeURIComponent(city)}&office=${encodeURIComponent(office)}&pointCode=${encodeURIComponent(pointCode)}`);
+                const logs = await res.json();
+                tbody.innerHTML = "";
+
+                if (logs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="text-center text-muted py-3">Записи не найдены</td></tr>`;
+                    return;
+                }
+
+                logs.forEach(l => {
+                    const createdAt = new Date(l.fileCreatedAt).toLocaleString();
+                    const sizeMb = (l.fileSizeBytes / 1024 / 1024).toFixed(1) + " MB";
+                    const badgeClass = l.status === "Success" ? "badge-success-custom" : "badge-danger-custom";
+
+                    tbody.innerHTML += `
+                            <tr>
+                                <td class="font-monospace small">${l.fileName}</td>
+                                <td>${sizeMb}</td>
+                                <td>${createdAt}</td>
+                                <td><span class="badge ${badgeClass} px-2 py-1">${l.status}</span></td>
+                            </tr>
+                        `;
+                });
+            } catch (err) { console.error(err); }
+        }
+
+        async function openSettingsModal() {
+            try {
+                const res = await fetch("/api/dashboard/settings");
+                const data = await res.json();
+                document.getElementById("settingOverdueDays").value = data.overdueDays;
+                document.getElementById("settingClosedDays").value = data.closedDays;
+                document.getElementById("settingMaxBackups").value = data.maxBackupsPerPoint;
+
+                const modal = new bootstrap.Modal(document.getElementById('settingsModal'));
+                modal.show();
+            } catch (err) { console.error(err); }
+        }
+
+        async function saveSettings() {
+            const overdueDays = parseInt(document.getElementById("settingOverdueDays").value);
+            const closedDays = parseInt(document.getElementById("settingClosedDays").value);
+            const maxBackupsPerPoint = parseInt(document.getElementById("settingMaxBackups").value);
+
+            try {
+                await fetch("/api/dashboard/settings", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ overdueDays, closedDays, maxBackupsPerPoint })
+                });
+
+                bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
+                loadDashboard();
+            } catch (err) { console.error(err); }
+        }
+
+        async function loadLogs() {
+            try {
+                const city = document.getElementById("logCitySelect").value;
+                const status = document.getElementById("logStatusSelect").value;
+                const res = await fetch(`/api/dashboard/logs?city=${encodeURIComponent(city)}&status=${encodeURIComponent(status)}`);
+                globalLogsData = await res.json();
+                applyLogsFilter();
+            } catch (err) { console.error(err); }
+        }
+
+        function applyLogsFilter() {
+            const searchText = document.getElementById("logSearchInput").value.toLowerCase().trim();
+            let filtered = globalLogsData;
+
+            if (searchText) {
+                filtered = filtered.filter(l =>
+                    l.fileName.toLowerCase().includes(searchText) ||
+                    l.officeName.toLowerCase().includes(searchText) ||
+                    l.pointCode.toLowerCase().includes(searchText)
+                );
+            }
+
+            filtered.sort((a, b) => {
+                let valA = a[currentLogsSortCol] ?? '';
+                let valB = b[currentLogsSortCol] ?? '';
+                if (typeof valA === 'string') valA = valA.toLowerCase();
+                if (typeof valB === 'string') valB = valB.toLowerCase();
+                if (valA < valB) return currentLogsSortAsc ? -1 : 1;
+                if (valA > valB) return currentLogsSortAsc ? 1 : -1;
+                return 0;
+            });
+
+            updateSortIcons('sort_log_', currentLogsSortCol, currentLogsSortAsc);
+            renderLogsTable(filtered);
+        }
+
+        function sortLogsTable(column) {
+            if (currentLogsSortCol === column) currentLogsSortAsc = !currentLogsSortAsc;
+            else { currentLogsSortCol = column; currentLogsSortAsc = true; }
+            applyLogsFilter();
+        }
+
+        function updateSortIcons(prefix, col, isAsc) {
+            document.querySelectorAll(`[id^='${prefix}']`).forEach(el => el.innerHTML = '');
+            const target = document.getElementById(prefix + col);
+            if (target) target.innerHTML = isAsc ? ' ▲' : ' ▼';
+        }
+
+        function renderLogsTable(data) {
+            const tbody = document.getElementById("logsTableBody");
+            tbody.innerHTML = "";
+
+            if (data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">Бэкапы не найдены</td></tr>`;
+                return;
+            }
+
+            data.forEach(l => {
+                const createdAt = new Date(l.fileCreatedAt).toLocaleString();
+                const sizeMb = (l.fileSizeBytes / 1024 / 1024).toFixed(1) + " MB";
+                let badgeClass = l.status === "Success" ? "badge-success-custom" : "badge-danger-custom";
+
+                tbody.innerHTML += `
+                        <tr>
+                            <td><strong>${l.cityName}</strong></td>
+                            <td>${l.officeName} <span class="badge bg-light text-dark ms-1">${l.pointCode}</span></td>
+                            <td class="font-monospace small">${l.fileName}</td>
+                            <td>${sizeMb}</td>
+                            <td>${createdAt}</td>
+                            <td><span class="badge ${badgeClass} px-2 py-1">${l.status}</span></td>
+                        </tr>
+                    `;
+            });
+        }
+
+        function resetLogsFilter() {
+            document.getElementById("logSearchInput").value = "";
+            document.getElementById("logCitySelect").value = "";
+            document.getElementById("logStatusSelect").value = "";
+            loadLogs();
+        }
+
+
+        async function triggerFtpRetention() {
+            if (!confirm("Вы уверены, что хотите удалить старые архивы с FTP, превышающие установленный лимит?")) {
+                return;
+            }
+
+            const btn = document.getElementById("btnCleanupFtp");
+            const originalText = btn.innerHTML;
+
+            btn.disabled = true;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span> Очистка...`;
+
+            try {
+                const res = await fetch("/api/dashboard/cleanup", { method: "POST" });
+                const data = await res.json();
+
+                if (res.ok) {
+                    alert(data.message || "Очистка успешно завершена!");
+                    await loadDashboard();
+                } else {
+                    alert("Ошибка очистки: " + (data.message || "Неизвестная ошибка"));
+                }
+            } catch (err) {
+                console.error("Ошибка ротации FTP:", err);
+                alert("Ошибка при вызове очистки FTP");
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+    </script>
+</body>
+</html>
