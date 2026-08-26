@@ -17,7 +17,7 @@ builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
 builder.Services.AddScoped<FileScannerService>();
-builder.Services.AddHostedService<FileScannerWorker>();
+
 builder.Services.AddHostedService<BackupRetentionWorker>();
 
 var app = builder.Build();
