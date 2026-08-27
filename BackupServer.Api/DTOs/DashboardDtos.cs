@@ -17,7 +17,9 @@ public record PointStatusDto(
     DateTime? LastBackupTime,
     long? LastFileSize,
     string Status, // "Success", "Missing", "Error"
-    bool IsActive
+    bool IsActive,
+    string DbType
+
 );
 
 // Элемент логирования для детального журнала
@@ -31,7 +33,8 @@ public record BackupLogDto(
     DateTime FileCreatedAt,
     DateTime ProcessedAt,
     string Status,
-    string? ErrorMessage
+    string? ErrorMessage,
+    string DbType
 );
 public record SettingsDto(
     int OverdueDays,

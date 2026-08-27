@@ -500,16 +500,28 @@
                 else if (p.status === "Error") { badgeClass = "badge-danger-custom"; statusText = "Ошибка бэкапа"; }
                 else if (p.status === "Closed") { badgeClass = "badge-secondary-custom"; statusText = "Закрыта (>30 дн)"; }
 
+                // 🛢️ Кликабельный бейдж СУБД (1 = MsSql, 2 = PostgreSql)
+                const pointId = p.pointId || p.id;
+                const isPg = p.dbType === 'PostgreSql';
+                const nextDbType = isPg ? 1 : 2;
+
+                const dbBadge = isPg
+                    ? `<span class="badge ms-1" style="font-size: 10px; background-color: #336791 !important; color: white; cursor: pointer;" onclick="toggleDbType(event, ${pointId}, ${nextDbType})" title="Нажмите, чтобы переключить на MSSQL">PostgreSQL</span>`
+                    : `<span class="badge ms-1" style="font-size: 10px; background-color: #0078d4 !important; color: white; cursor: pointer;" onclick="toggleDbType(event, ${pointId}, ${nextDbType})" title="Нажмите, чтобы переключить на PostgreSQL">MSSQL</span>`;
+
                 tbody.innerHTML += `
-                        <tr class="clickable-row" onclick="openPointHistoryModal('${p.cityName}', '${p.officeName}', '${p.pointCode}')" title="Нажмите, чтобы открыть историю кассы">
-                            <td><strong>${p.cityName}</strong></td>
-                            <td>${p.officeName}</td>
-                            <td><span class="badge bg-secondary">${p.pointCode}</span></td>
-                            <td>${lastTime}</td>
-                            <td>${sizeMb}</td>
-                            <td><span class="badge ${badgeClass} px-3 py-2">${statusText}</span></td>
-                        </tr>
-                    `;
+            <tr class="clickable-row" onclick="openPointHistoryModal('${p.cityName}', '${p.officeName}', '${p.pointCode}')" title="Нажмите, чтобы открыть историю кассы">
+                <td><strong>${p.cityName}</strong></td>
+                <td>${p.officeName}</td>
+                <td>
+                    <span class="badge bg-secondary">${p.pointCode}</span>
+                    ${dbBadge}
+                </td>
+                <td>${lastTime}</td>
+                <td>${sizeMb}</td>
+                <td><span class="badge ${badgeClass} px-3 py-2">${statusText}</span></td>
+            </tr>
+        `;
             });
         }
 
@@ -630,8 +642,8 @@
             const tbody = document.getElementById("logsTableBody");
             tbody.innerHTML = "";
 
-            if (data.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">Бэкапы не найдены</td></tr>`;
+            if (!data || data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted py-4">Бэкапы не найдены</td></tr>`;
                 return;
             }
 
@@ -640,10 +652,19 @@
                 const sizeMb = (l.fileSizeBytes / 1024 / 1024).toFixed(1) + " MB";
                 let badgeClass = l.status === "Success" ? "badge-success-custom" : "badge-danger-custom";
 
+                // 🛢️ Вычисляем бейдж СУБД для журнала
+                const dbBadge = l.dbType === 'PostgreSql'
+                    ? `<span class="badge" style="font-size: 10px; background-color: #336791 !important; color: white;">PostgreSQL</span>`
+                    : `<span class="badge" style="font-size: 10px; background-color: #0078d4 !important; color: white;">MSSQL</span>`;
+
                 tbody.innerHTML += `
                         <tr>
                             <td><strong>${l.cityName}</strong></td>
-                            <td>${l.officeName} <span class="badge bg-light text-dark ms-1">${l.pointCode}</span></td>
+                            <td>
+                                ${l.officeName}
+                                <span class="badge bg-light text-dark ms-1">${l.pointCode}</span>
+                                ${dbBadge}
+                            </td>
                             <td class="font-monospace small">${l.fileName}</td>
                             <td>${sizeMb}</td>
                             <td>${createdAt}</td>
@@ -660,6 +681,30 @@
             loadLogs();
         }
 
+        async function toggleDbType(event, pointId, newDbType) {
+            event.stopPropagation(); // Не открывать модалку истории
+
+            if (!pointId || pointId === 'undefined') {
+                alert("Ошибка: не удалось определить ID кассы");
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/dashboard/points/${pointId}/dbtype`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(newDbType)
+                });
+
+                if (res.ok) {
+                    await loadPointsStatus();
+                } else {
+                    alert("Не удалось изменить тип СУБД (код " + res.status + ")");
+                }
+            } catch (err) {
+                console.error("Ошибка при смене СУБД:", err);
+            }
+        }
 
         async function triggerFtpRetention() {
             if (!confirm("Вы уверены, что хотите удалить старые архивы с FTP, превышающие установленный лимит?")) {

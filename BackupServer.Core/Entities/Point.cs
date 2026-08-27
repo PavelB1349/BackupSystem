@@ -1,4 +1,5 @@
-﻿using System;
+﻿using BackupServer.Core.Enums;
+using System;
 using System.Collections.Generic;
 using System.Text;
 
@@ -15,6 +16,8 @@ namespace BackupServer.Core.Entities
         public bool IsActive { get; set; } = true;
 
         public ExchangeOffice ExchangeOffice { get; set; } = null!;
+        // 🛢️ Поле для хранения СУБД (по умолчанию MSSQL)
+        public DatabaseType DbType { get; set; } = DatabaseType.MsSql;
         public ICollection<BackupLog> BackupLogs { get; set; } = new List<BackupLog>();
     }
 }

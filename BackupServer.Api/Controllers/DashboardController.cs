@@ -9,7 +9,7 @@ namespace BackupServer.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-public class DashboardController : ControllerBase   
+public class DashboardController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
@@ -118,7 +118,8 @@ public class DashboardController : ControllerBase
                 latestLog?.FileCreatedAt,
                 latestLog?.FileSizeBytes,
                 status,
-                point.IsActive
+                point.IsActive,
+                point.DbType.ToString() // 🛢️ Передаём СУБД ("MsSql" или "PostgreSql")
             ));
         }
 
@@ -165,11 +166,25 @@ public class DashboardController : ControllerBase
                 b.FileCreatedAt,
                 b.ProcessedAt,
                 b.Status.ToString(),
-                b.ErrorMessage
+                b.ErrorMessage,
+                b.Point.DbType.ToString() // 🛢️ Передаём СУБД ("MsSql" или "PostgreSql")
             ))
             .ToListAsync();
 
         return Ok(logs);
+    }
+
+    // 🛢️ PUT: api/dashboard/points/{id}/dbtype (СМЕНА СУБД ДЛЯ КАССЫ)
+    [HttpPut("points/{id}/dbtype")]
+    public async Task<IActionResult> UpdatePointDbType(int id, [FromBody] DatabaseType dbType)
+    {
+        var point = await _db.Points.FindAsync(id);
+        if (point == null) return NotFound(new { Message = "Касса не найдена" });
+
+        point.DbType = dbType;
+        await _db.SaveChangesAsync();
+
+        return Ok(new { Message = $"СУБД для кассы успешно изменена на {dbType}" });
     }
 
     // POST: api/dashboard/scan (СКАНИРОВАНИЕ С ОПРЕДЕЛЕНИЕМ ГОРОДА ИЗ ПУТИ)
@@ -213,14 +228,14 @@ public class DashboardController : ControllerBase
                         string officeName = parts[0]; // Gudvin
                         string pointCode = parts[1];  // OP1
 
-                        // 🏙️ Извлекаем город из полного пути FTP (Backups_V2/Караганда/Гудвин 2.0/...)
-                        string detectedCityName = "Алматы"; // дефолт, если путь не распарсится
+                        // 🏙️ Извлекаем город из полного пути FTP
+                        string detectedCityName = "Алматы";
                         var pathSegments = item.FullName.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
                         int rootIndex = Array.FindIndex(pathSegments, s => s.Equals("Backups_V2", StringComparison.OrdinalIgnoreCase));
                         if (rootIndex >= 0 && pathSegments.Length > rootIndex + 1)
                         {
-                            detectedCityName = pathSegments[rootIndex + 1]; // "Караганда"
+                            detectedCityName = pathSegments[rootIndex + 1];
                         }
 
                         // Ищем точку в базе
@@ -228,10 +243,9 @@ public class DashboardController : ControllerBase
                             .Include(p => p.ExchangeOffice)
                             .FirstOrDefaultAsync(p => p.Code == pointCode && p.ExchangeOffice.Name == officeName);
 
-                        // ⚡ АВТО-СОЗДАНИЕ с реальным городом
+                        // ⚡ АВТО-СОЗДАНИЕ
                         if (point == null)
                         {
-                            // 1. Ищем или создаем город
                             var city = await _db.Cities.FirstOrDefaultAsync(c => c.Name == detectedCityName);
                             if (city == null)
                             {
@@ -240,7 +254,6 @@ public class DashboardController : ControllerBase
                                 await _db.SaveChangesAsync();
                             }
 
-                            // 2. Ищем или создаем обменник
                             var office = await _db.ExchangeOffices
                                 .FirstOrDefaultAsync(e => e.Name == officeName);
 
@@ -255,12 +268,12 @@ public class DashboardController : ControllerBase
                                 await _db.SaveChangesAsync();
                             }
 
-                            // 3. Создаем точку
                             point = new BackupServer.Core.Entities.Point
                             {
                                 Code = pointCode,
                                 ExchangeOfficeId = office.Id,
-                                IsActive = true
+                                IsActive = true,
+                                DbType = DatabaseType.MsSql // По умолчанию MSSQL
                             };
                             _db.Points.Add(point);
                             await _db.SaveChangesAsync();
@@ -359,13 +372,12 @@ public class DashboardController : ControllerBase
                             {
                                 try
                                 {
-                                    // Удаляем файл прямо по сохраненному пути FTP
                                     ftp.DeleteFile(log.FilePath);
                                     deletedFilesCount++;
                                 }
                                 catch
                                 {
-                                    // Если файл уже был удален вручную с диска, просто продолжаем
+                                    // Файл физически отсутствует на FTP
                                 }
                             }
 
