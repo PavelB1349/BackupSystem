@@ -39,5 +39,6 @@ public record BackupLogDto(
 public record SettingsDto(
     int OverdueDays,
     int ClosedDays,
-    int MaxBackupsPerPoint
+    int MaxBackupsPerPoint,
+    int ScanIntervalMinutes
 );

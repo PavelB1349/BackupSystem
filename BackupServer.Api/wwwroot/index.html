@@ -322,6 +322,10 @@
                 </div>
                 <div class="modal-body">
                     <div class="mb-3">
+                        <label for="scanIntervalMinutes" class="form-label">Интервал автосканирования FTP (минут):</label>
+                        <input type="number" id="scanIntervalMinutes" class="form-control" min="1" placeholder="15">
+                    </div>
+                    <div class="mb-3">
                         <label class="form-label fw-semibold">Допустимая просрочка (в днях):</label>
                         <input type="number" id="settingOverdueDays" class="form-control" min="1" max="10">
                         <div class="form-text">Спустя столько дней бэкап переходит в статус «Пропущен / Просрочен».</div>
@@ -564,16 +568,18 @@
             try {
                 const res = await fetch("/api/dashboard/settings");
                 const data = await res.json();
+                document.getElementById("scanIntervalMinutes").value = data.scanIntervalMinutes || 15;
                 document.getElementById("settingOverdueDays").value = data.overdueDays;
                 document.getElementById("settingClosedDays").value = data.closedDays;
                 document.getElementById("settingMaxBackups").value = data.maxBackupsPerPoint;
 
                 const modal = new bootstrap.Modal(document.getElementById('settingsModal'));
                 modal.show();
-            } catch (err) { console.error(err); }
-        }
+                    } catch (err) { console.error(err); }
+                }
 
         async function saveSettings() {
+            const scanIntervalMinutes = parseInt(document.getElementById("scanIntervalMinutes").value) || 15; // ⚡ Считываем интервал
             const overdueDays = parseInt(document.getElementById("settingOverdueDays").value);
             const closedDays = parseInt(document.getElementById("settingClosedDays").value);
             const maxBackupsPerPoint = parseInt(document.getElementById("settingMaxBackups").value);
@@ -582,13 +588,13 @@
                 await fetch("/api/dashboard/settings", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ overdueDays, closedDays, maxBackupsPerPoint })
+                    body: JSON.stringify({ overdueDays, closedDays, maxBackupsPerPoint, scanIntervalMinutes }) // ⚡ Отправляем DTO
                 });
 
                 bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
                 loadDashboard();
-            } catch (err) { console.error(err); }
-        }
+                    } catch (err) { console.error(err); }
+                }
 
         async function loadLogs() {
             try {

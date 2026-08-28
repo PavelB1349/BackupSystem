@@ -422,7 +422,8 @@ public class DashboardController : ControllerBase
         return Ok(new SettingsDto(
             DynamicSettings.OverdueDays,
             DynamicSettings.ClosedDays,
-            DynamicSettings.MaxBackupsPerPoint
+            DynamicSettings.MaxBackupsPerPoint,
+            DynamicSettings.ScanIntervalMinutes
         ));
     }
 
@@ -432,6 +433,7 @@ public class DashboardController : ControllerBase
         DynamicSettings.OverdueDays = Math.Max(1, dto.OverdueDays);
         DynamicSettings.ClosedDays = Math.Max(1, dto.ClosedDays);
         DynamicSettings.MaxBackupsPerPoint = Math.Max(1, dto.MaxBackupsPerPoint);
+        DynamicSettings.ScanIntervalMinutes = Math.Max(1, dto.ScanIntervalMinutes);
 
         return Ok(new { Message = "Настройки успешно сохранены!" });
     }

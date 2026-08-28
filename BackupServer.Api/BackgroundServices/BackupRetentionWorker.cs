@@ -38,9 +38,12 @@ namespace BackupServer.Api.BackgroundServices
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
+            _logger.LogInformation("[Worker] Сервис автосканирования и ротации запущен.");
+            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+
             while (!stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("Запуск фонового сканирования и ротации FTP...");
+                _logger.LogInformation($"[Worker] Запуск фонового сканирования и ротации FTP ({DateTime.Now:HH:mm:ss})...");
 
                 try
                 {
@@ -52,11 +55,14 @@ namespace BackupServer.Api.BackgroundServices
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Ошибка при выполнении фоновой задачи FTP");
+                    _logger.LogError(ex, "[Worker] Ошибка при выполнении фоновой задачи FTP");
                 }
 
-                // ⏱️ Интервал запуска (по умолчанию 1 час)
-                await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
+                // ⚡ Динамически считываем интервал при каждом вызове задержки
+                int currentInterval = Math.Max(1, DynamicSettings.ScanIntervalMinutes);
+                _logger.LogInformation($"[Worker] Следующее сканирование через {currentInterval} мин.");
+
+                await Task.Delay(TimeSpan.FromMinutes(currentInterval), stoppingToken);
             }
         }
 
@@ -78,7 +84,9 @@ namespace BackupServer.Api.BackgroundServices
                 string targetFolder = ftp.DirectoryExists(rootFolder) ? rootFolder : ".";
                 var items = ftp.GetListing(targetFolder, FtpListOption.Recursive | FtpListOption.Modify);
 
-                // --- 1. СКАНИРОВАНИЕ И АВТО-СОЗДАНИЕ КАСС ---
+                // =======================================================
+                // ШАГ 1: СКАНИРОВАНИЕ, АВТО-СОЗДАНИЕ И ОБНОВЛЕНИЕ СУБД
+                // =======================================================
                 foreach (var item in items)
                 {
                     if (item.Type != FtpObjectType.File || !item.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
@@ -93,7 +101,11 @@ namespace BackupServer.Api.BackgroundServices
                         string officeName = parts[0];
                         string pointCode = parts[1];
 
-                        // Извлекаем город из пути FTP
+                        // 🛢️ Проверяем наличие метки СУБД в названии файла (PG или SQL)
+                        bool hasDbTag = parts.Length >= 5 && (parts[2].Equals("PG", StringComparison.OrdinalIgnoreCase) || parts[2].Equals("SQL", StringComparison.OrdinalIgnoreCase));
+                        bool isPg = hasDbTag && parts[2].Equals("PG", StringComparison.OrdinalIgnoreCase);
+
+                        // 🏙️ Извлекаем город из пути FTP
                         string detectedCityName = "Алматы";
                         var pathSegments = item.FullName.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
                         int rootIndex = Array.FindIndex(pathSegments, s => s.Equals("Backups_V2", StringComparison.OrdinalIgnoreCase));
@@ -132,20 +144,31 @@ namespace BackupServer.Api.BackgroundServices
                             {
                                 Code = pointCode,
                                 ExchangeOfficeId = office.Id,
-                                IsActive = true
+                                IsActive = true,
+                                DbType = isPg ? DatabaseType.PostgreSql : DatabaseType.MsSql
                             };
                             db.Points.Add(point);
                             await db.SaveChangesAsync();
                         }
+                        else if (hasDbTag)
+                        {
+                            // ⚡ Актуализируем СУБД существующей кассы, если пришел файл с тегом PG/SQL
+                            var detectedDbType = isPg ? DatabaseType.PostgreSql : DatabaseType.MsSql;
+                            if (point.DbType != detectedDbType)
+                            {
+                                point.DbType = detectedDbType;
+                            }
+                        }
 
-                        // Парсинг точной даты из имени файла
+                        // 🕒 Умный парсинг даты (учитывает смещение индексов из-за метки СУБД)
                         DateTime fileDate = DateTime.Now;
-                        if (parts.Length >= 4 && DateTime.TryParseExact(
-                            $"{parts[2]}_{parts[3]}",
-                            "yyyy-MM-dd_HHmmss",
-                            CultureInfo.InvariantCulture,
-                            DateTimeStyles.None,
-                            out var parsedDate))
+                        string datePart = hasDbTag ? parts[3] : (parts.Length >= 3 ? parts[2] : "");
+                        string timePart = hasDbTag ? parts[4] : (parts.Length >= 4 ? parts[3] : "");
+
+                        if (!string.IsNullOrEmpty(datePart) && !string.IsNullOrEmpty(timePart) &&
+                            DateTime.TryParseExact($"{datePart}_{timePart}", "yyyy-MM-dd_HHmmss",
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None, out var parsedDate))
                         {
                             fileDate = parsedDate;
                         }
@@ -176,7 +199,9 @@ namespace BackupServer.Api.BackgroundServices
                     _logger.LogInformation($"[Авто-сканер] Добавлено новых бэкапов: {newFilesFound}");
                 }
 
-                // --- 2. РОТАЦИЯ СТАРОГО БЭКАПА ---
+                // =======================================================
+                // ШАГ 2: РОТАЦИЯ СТАРОГО БЭКАПА
+                // =======================================================
                 int maxBackups = DynamicSettings.MaxBackupsPerPoint;
                 var points = await db.Points.ToListAsync();
 
