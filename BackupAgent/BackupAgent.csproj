@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UserSecretsId>c045a522-bd8e-46b8-b0ad-dcb8a2c695b7</UserSecretsId>
+	  <!-- ⚡ Фикс для работы Microsoft.Data.SqlClient при сборке в SingleFile -->
+	  <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
 
   <ItemGroup>
