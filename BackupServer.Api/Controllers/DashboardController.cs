@@ -187,7 +187,7 @@ public class DashboardController : ControllerBase
         return Ok(new { Message = $"СУБД для кассы успешно изменена на {dbType}" });
     }
 
-    // POST: api/dashboard/scan (СКАНИРОВАНИЕ С ОПРЕДЕЛЕНИЕМ ГОРОДА ИЗ ПУТИ)
+    // POST: api/dashboard/scan (СКАНИРОВАНИЕ С ОПРЕДЕЛЕНИЕМ ГОРОДА И СУБД)
     [HttpPost("scan")]
     public async Task<IActionResult> ForceScan()
     {
@@ -225,10 +225,14 @@ public class DashboardController : ControllerBase
                     var parts = Path.GetFileNameWithoutExtension(item.Name).Split('_');
                     if (parts.Length >= 2)
                     {
-                        string officeName = parts[0]; // Gudvin
+                        string officeName = parts[0]; // PGTest
                         string pointCode = parts[1];  // OP1
 
-                        // 🏙️ Извлекаем город из полного пути FTP
+                        // 🛢️ Проверяем наличие метки СУБД в названии файла (PG или SQL)
+                        bool hasDbTag = parts.Length >= 5 && (parts[2].Equals("PG", StringComparison.OrdinalIgnoreCase) || parts[2].Equals("SQL", StringComparison.OrdinalIgnoreCase));
+                        bool isPg = hasDbTag && parts[2].Equals("PG", StringComparison.OrdinalIgnoreCase);
+
+                        // 🏙️ Извлекаем город из пути FTP
                         string detectedCityName = "Алматы";
                         var pathSegments = item.FullName.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -273,21 +277,31 @@ public class DashboardController : ControllerBase
                                 Code = pointCode,
                                 ExchangeOfficeId = office.Id,
                                 IsActive = true,
-                                DbType = DatabaseType.MsSql // По умолчанию MSSQL
+                                DbType = isPg ? DatabaseType.PostgreSql : DatabaseType.MsSql
                             };
                             _db.Points.Add(point);
                             await _db.SaveChangesAsync();
                             autoCreatedPointsCount++;
                         }
+                        else if (hasDbTag)
+                        {
+                            // ⚡ ОБНОВЛЯЕМ СУБД существующей кассы при поступлении файла с тегом PG/SQL
+                            var detectedDbType = isPg ? DatabaseType.PostgreSql : DatabaseType.MsSql;
+                            if (point.DbType != detectedDbType)
+                            {
+                                point.DbType = detectedDbType;
+                            }
+                        }
 
-                        // 🕒 Парсинг даты из файла
+                        // 🕒 Парсинг даты (учитывает наличие/отсутствие метки СУБД)
                         DateTime fileDate = DateTime.Now;
-                        if (parts.Length >= 4 && DateTime.TryParseExact(
-                            $"{parts[2]}_{parts[3]}",
-                            "yyyy-MM-dd_HHmmss",
-                            System.Globalization.CultureInfo.InvariantCulture,
-                            System.Globalization.DateTimeStyles.None,
-                            out var parsedDate))
+                        string datePart = hasDbTag ? parts[3] : (parts.Length >= 3 ? parts[2] : "");
+                        string timePart = hasDbTag ? parts[4] : (parts.Length >= 4 ? parts[3] : "");
+
+                        if (!string.IsNullOrEmpty(datePart) && !string.IsNullOrEmpty(timePart) &&
+                            DateTime.TryParseExact($"{datePart}_{timePart}", "yyyy-MM-dd_HHmmss",
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                System.Globalization.DateTimeStyles.None, out var parsedDate))
                         {
                             fileDate = parsedDate;
                         }
@@ -312,7 +326,7 @@ public class DashboardController : ControllerBase
                     }
                 }
 
-                if (newFilesFound > 0)
+                if (newFilesFound > 0 || _db.ChangeTracker.HasChanges())
                 {
                     await _db.SaveChangesAsync();
                 }

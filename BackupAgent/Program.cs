@@ -177,7 +177,8 @@ try
     Directory.CreateDirectory(tempFolder);
 
     string tempBakPath = Path.Combine(tempFolder, $"{dbName}_{timestamp}.bak");
-    string archiveFileName = $"{officeName}_{pointCode}_{timestamp}.zip";
+    string dbPrefix = dbType.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase) ? "PG" : "SQL";
+    string archiveFileName = $"{officeName}_{pointCode}_{dbPrefix}_{timestamp}.zip";
     string tempZipPath = Path.Combine(tempFolder, archiveFileName);
 
     Console.WriteLine($"\n[1/3] Создание дампа базы ({dbType})...");
