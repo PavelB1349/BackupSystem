@@ -348,6 +348,28 @@
             </div>
         </div>
     </div>
+    <div class="modal fade" id="loginModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content shadow">
+                <div class="modal-header bg-dark text-white text-center">
+                    <h5 class="modal-title w-100 fw-bold"><i class="fa-solid fa-lock me-2"></i>Авторизация</h5>
+                </div>
+                <div class="modal-body p-4">
+                    <form onsubmit="handleLogin(event)">
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">Логин</label>
+                            <input type="text" id="loginUser" class="form-control" value="admin" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">Пароль</label>
+                            <input type="password" id="loginPass" class="form-control" placeholder="••••••••" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 fw-semibold">Войти</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
@@ -357,20 +379,81 @@
         let currentPointsSortAsc = false;
         let currentLogsSortCol = 'fileCreatedAt';
         let currentLogsSortAsc = false;
+        let loginModal;
 
+        // Единая точка входа при загрузке страницы
         document.addEventListener("DOMContentLoaded", () => {
-            loadDashboard();
+            loginModal = new bootstrap.Modal(document.getElementById('loginModal'));
+            checkAuth();
         });
 
+        // Единый перехватчик для ВСЕХ запросов к API
+        async function apiFetch(url, options = {}) {
+            const res = await fetch(url, options);
+
+            if (res.status === 401) {
+                loginModal.show();
+                throw new Error("Необходима авторизация");
+            }
+
+            return res;
+        }
+
+        // Проверка сессии при открытии страницы
+        async function checkAuth() {
+            try {
+                const res = await fetch("/api/auth/me");
+                if (res.ok) {
+                    loadDashboard();
+                } else {
+                    loginModal.show();
+                }
+            } catch {
+                loginModal.show();
+            }
+        }
+
+        // Логика формы входа
+        async function handleLogin(e) {
+            e.preventDefault();
+            const username = document.getElementById("loginUser").value;
+            const password = document.getElementById("loginPass").value;
+
+            const res = await fetch("/api/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password })
+            });
+
+            if (res.ok) {
+                loginModal.hide();
+                loadDashboard();
+            } else {
+                alert("Неверный логин или пароль!");
+            }
+        }
+
+        // Загрузка главного экрана
+        async function loadDashboard() {
+            try {
+                await loadStats();
+                await loadPointsStatus();
+                await loadLogs();
+            } catch (err) {
+                console.error("Ошибка загрузки дашборда:", err);
+            }
+        }
+
+        // Запуск сканера FTP
         async function triggerFtpScan() {
             const btn = document.getElementById("btnScanFtp");
             const originalText = btn.innerHTML;
 
             btn.disabled = true;
-            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span> Сканирование...`;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Сканирование...`;
 
             try {
-                const res = await fetch("/api/dashboard/scan", { method: "POST" });
+                const res = await apiFetch("/api/dashboard/scan", { method: "POST" });
                 const data = await res.json();
 
                 if (res.ok) {
@@ -380,23 +463,18 @@
                     alert("Ошибка сканирования: " + (data.message || "Неизвестная ошибка"));
                 }
             } catch (err) {
-                console.error("Ошибка сканирования FTP:", err);
-                alert("Ошибка при вызове сканера FTP");
+                if (err.message !== "Необходима авторизация") {
+                    alert("Ошибка при вызове сканера FTP");
+                }
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalText;
             }
         }
 
-        async function loadDashboard() {
-            loadStats();
-            await loadPointsStatus();
-            loadLogs();
-        }
-
         async function loadStats() {
             try {
-                const res = await fetch("/api/dashboard/stats");
+                const res = await apiFetch("/api/dashboard/stats");
                 const data = await res.json();
                 document.getElementById("statTotalPoints").innerText = data.totalPoints;
                 document.getElementById("statBackupsToday").innerText = data.backupsToday;
@@ -407,7 +485,7 @@
 
         async function loadPointsStatus() {
             try {
-                const res = await fetch("/api/dashboard/points");
+                const res = await apiFetch("/api/dashboard/points");
                 globalPointsData = await res.json();
                 populateCityDropdowns(globalPointsData);
                 applyPointsFilter();
@@ -504,7 +582,6 @@
                 else if (p.status === "Error") { badgeClass = "badge-danger-custom"; statusText = "Ошибка бэкапа"; }
                 else if (p.status === "Closed") { badgeClass = "badge-secondary-custom"; statusText = "Закрыта (>30 дн)"; }
 
-                // 🛢️ Кликабельный бейдж СУБД (1 = MsSql, 2 = PostgreSql)
                 const pointId = p.pointId || p.id;
                 const isPg = p.dbType === 'PostgreSql';
                 const nextDbType = isPg ? 1 : 2;
@@ -538,7 +615,7 @@
             modal.show();
 
             try {
-                const res = await fetch(`/api/dashboard/logs?city=${encodeURIComponent(city)}&office=${encodeURIComponent(office)}&pointCode=${encodeURIComponent(pointCode)}`);
+                const res = await apiFetch(`/api/dashboard/logs?city=${encodeURIComponent(city)}&office=${encodeURIComponent(office)}&pointCode=${encodeURIComponent(pointCode)}`);
                 const logs = await res.json();
                 tbody.innerHTML = "";
 
@@ -553,20 +630,20 @@
                     const badgeClass = l.status === "Success" ? "badge-success-custom" : "badge-danger-custom";
 
                     tbody.innerHTML += `
-                            <tr>
-                                <td class="font-monospace small">${l.fileName}</td>
-                                <td>${sizeMb}</td>
-                                <td>${createdAt}</td>
-                                <td><span class="badge ${badgeClass} px-2 py-1">${l.status}</span></td>
-                            </tr>
-                        `;
+                <tr>
+                    <td class="font-monospace small">${l.fileName}</td>
+                    <td>${sizeMb}</td>
+                    <td>${createdAt}</td>
+                    <td><span class="badge ${badgeClass} px-2 py-1">${l.status}</span></td>
+                </tr>
+            `;
                 });
             } catch (err) { console.error(err); }
         }
 
         async function openSettingsModal() {
             try {
-                const res = await fetch("/api/dashboard/settings");
+                const res = await apiFetch("/api/dashboard/settings");
                 const data = await res.json();
                 document.getElementById("scanIntervalMinutes").value = data.scanIntervalMinutes || 15;
                 document.getElementById("settingOverdueDays").value = data.overdueDays;
@@ -575,32 +652,32 @@
 
                 const modal = new bootstrap.Modal(document.getElementById('settingsModal'));
                 modal.show();
-                    } catch (err) { console.error(err); }
-                }
+            } catch (err) { console.error(err); }
+        }
 
         async function saveSettings() {
-            const scanIntervalMinutes = parseInt(document.getElementById("scanIntervalMinutes").value) || 15; // ⚡ Считываем интервал
+            const scanIntervalMinutes = parseInt(document.getElementById("scanIntervalMinutes").value) || 15;
             const overdueDays = parseInt(document.getElementById("settingOverdueDays").value);
             const closedDays = parseInt(document.getElementById("settingClosedDays").value);
             const maxBackupsPerPoint = parseInt(document.getElementById("settingMaxBackups").value);
 
             try {
-                await fetch("/api/dashboard/settings", {
+                await apiFetch("/api/dashboard/settings", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ overdueDays, closedDays, maxBackupsPerPoint, scanIntervalMinutes }) // ⚡ Отправляем DTO
+                    body: JSON.stringify({ overdueDays, closedDays, maxBackupsPerPoint, scanIntervalMinutes })
                 });
 
                 bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
                 loadDashboard();
-                    } catch (err) { console.error(err); }
-                }
+            } catch (err) { console.error(err); }
+        }
 
         async function loadLogs() {
             try {
                 const city = document.getElementById("logCitySelect").value;
                 const status = document.getElementById("logStatusSelect").value;
-                const res = await fetch(`/api/dashboard/logs?city=${encodeURIComponent(city)}&status=${encodeURIComponent(status)}`);
+                const res = await apiFetch(`/api/dashboard/logs?city=${encodeURIComponent(city)}&status=${encodeURIComponent(status)}`);
                 globalLogsData = await res.json();
                 applyLogsFilter();
             } catch (err) { console.error(err); }
@@ -658,25 +735,24 @@
                 const sizeMb = (l.fileSizeBytes / 1024 / 1024).toFixed(1) + " MB";
                 let badgeClass = l.status === "Success" ? "badge-success-custom" : "badge-danger-custom";
 
-                // 🛢️ Вычисляем бейдж СУБД для журнала
                 const dbBadge = l.dbType === 'PostgreSql'
                     ? `<span class="badge" style="font-size: 10px; background-color: #336791 !important; color: white;">PostgreSQL</span>`
                     : `<span class="badge" style="font-size: 10px; background-color: #0078d4 !important; color: white;">MSSQL</span>`;
 
                 tbody.innerHTML += `
-                        <tr>
-                            <td><strong>${l.cityName}</strong></td>
-                            <td>
-                                ${l.officeName}
-                                <span class="badge bg-light text-dark ms-1">${l.pointCode}</span>
-                                ${dbBadge}
-                            </td>
-                            <td class="font-monospace small">${l.fileName}</td>
-                            <td>${sizeMb}</td>
-                            <td>${createdAt}</td>
-                            <td><span class="badge ${badgeClass} px-2 py-1">${l.status}</span></td>
-                        </tr>
-                    `;
+            <tr>
+                <td><strong>${l.cityName}</strong></td>
+                <td>
+                    ${l.officeName}
+                    <span class="badge bg-light text-dark ms-1">${l.pointCode}</span>
+                    ${dbBadge}
+                </td>
+                <td class="font-monospace small">${l.fileName}</td>
+                <td>${sizeMb}</td>
+                <td>${createdAt}</td>
+                <td><span class="badge ${badgeClass} px-2 py-1">${l.status}</span></td>
+            </tr>
+        `;
             });
         }
 
@@ -688,7 +764,7 @@
         }
 
         async function toggleDbType(event, pointId, newDbType) {
-            event.stopPropagation(); // Не открывать модалку истории
+            event.stopPropagation();
 
             if (!pointId || pointId === 'undefined') {
                 alert("Ошибка: не удалось определить ID кассы");
@@ -696,7 +772,7 @@
             }
 
             try {
-                const res = await fetch(`/api/dashboard/points/${pointId}/dbtype`, {
+                const res = await apiFetch(`/api/dashboard/points/${pointId}/dbtype`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(newDbType)
@@ -721,10 +797,10 @@
             const originalText = btn.innerHTML;
 
             btn.disabled = true;
-            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span> Очистка...`;
+            btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span> Очистка...`;
 
             try {
-                const res = await fetch("/api/dashboard/cleanup", { method: "POST" });
+                const res = await apiFetch("/api/dashboard/cleanup", { method: "POST" });
                 const data = await res.json();
 
                 if (res.ok) {
@@ -734,8 +810,9 @@
                     alert("Ошибка очистки: " + (data.message || "Неизвестная ошибка"));
                 }
             } catch (err) {
-                console.error("Ошибка ротации FTP:", err);
-                alert("Ошибка при вызове очистки FTP");
+                if (err.message !== "Необходима авторизация") {
+                    alert("Ошибка при вызове очистки FTP");
+                }
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalText;
