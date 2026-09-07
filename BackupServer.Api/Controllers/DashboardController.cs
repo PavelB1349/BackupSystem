@@ -76,13 +76,11 @@ public class DashboardController : ControllerBase
         var thresholdClosed = now.AddDays(-DynamicSettings.ClosedDays);
 
         var points = await _db.Points
-            .Include(p => p.ExchangeOffice)
-            .ThenInclude(e => e.City)
-            .Where(p => p.IsActive)
-            .ToListAsync();
+        .Include(p => p.ExchangeOffice)
+        .ThenInclude(e => e.City)
+        .ToListAsync();
 
         var result = new List<PointStatusDto>();
-
         foreach (var point in points)
         {
             var latestLog = await _db.BackupLogs
@@ -92,7 +90,12 @@ public class DashboardController : ControllerBase
 
             string status = "Missing";
 
-            if (latestLog != null)
+            // Если касса отключена вручную
+            if (!point.IsActive)
+            {
+                status = "Disabled";
+            }
+            else if (latestLog != null)
             {
                 if (latestLog.FileCreatedAt < thresholdClosed)
                 {
@@ -121,7 +124,7 @@ public class DashboardController : ControllerBase
                 latestLog?.FileSizeBytes,
                 status,
                 point.IsActive,
-                point.DbType.ToString() // 🛢️ Передаём СУБД ("MsSql" или "PostgreSql")
+                point.DbType.ToString()
             ));
         }
 
@@ -416,6 +419,20 @@ public class DashboardController : ControllerBase
         {
             return StatusCode(500, new { Message = $"Ошибка очистки FTP: {ex.Message}" });
         }
+    }
+
+    // PATCH: api/dashboard/points/{id}/toggle-active
+    [HttpPatch("points/{id}/toggle-active")]
+    public async Task<IActionResult> TogglePointActive(int id)
+    {
+        var point = await _db.Points.FindAsync(id);
+        if (point == null) return NotFound(new { Message = "Касса не найдена" });
+
+        point.IsActive = !point.IsActive; // Переключаем статус
+        await _db.SaveChangesAsync();
+
+        string state = point.IsActive ? "активирована" : "отключена от мониторинга";
+        return Ok(new { Message = $"Касса {point.Code} {state}", IsActive = point.IsActive });
     }
 
     [HttpGet("settings")]

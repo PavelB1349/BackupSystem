@@ -213,6 +213,7 @@
                                 <option value="Missing">🟡 Пропущен / Просрочен</option>
                                 <option value="Error">🔴 Ошибка</option>
                                 <option value="Closed">⚪ Закрыта (>30 дн)</option>
+                                <option value="Disabled">⚙️ Мониторинг отключен</option> <!-- ⚡ Добавили пункт -->
                             </select>
                         </div>
                         <div class="col-md-1 text-end">
@@ -581,10 +582,17 @@
                 if (p.status === "Success") { badgeClass = "badge-success-custom"; statusText = "Сдан в срок"; }
                 else if (p.status === "Error") { badgeClass = "badge-danger-custom"; statusText = "Ошибка бэкапа"; }
                 else if (p.status === "Closed") { badgeClass = "badge-secondary-custom"; statusText = "Закрыта (>30 дн)"; }
+                else if (p.status === "Disabled" || !p.isActive) { badgeClass = "badge-secondary-custom"; statusText = "Отключена"; } // ⚡ Обработка отключенной кассы
 
                 const pointId = p.pointId || p.id;
                 const isPg = p.dbType === 'PostgreSql';
                 const nextDbType = isPg ? 1 : 2;
+
+                // ⚡ ДОБАВЛЕНА КНОПКА АКТИВНОСТИ
+                const activeIcon = p.isActive
+                    ? `<i class="fa-solid fa-bell text-success" title="Мониторинг включен"></i>`
+                    : `<i class="fa-solid fa-bell-slash text-danger" title="Мониторинг отключен"></i>`;
+                const activeBtn = `<button class="btn btn-sm btn-light border p-1 ms-2" onclick="togglePointActive(event, ${pointId})" style="line-height: 1;">${activeIcon}</button>`;
 
                 const dbBadge = isPg
                     ? `<span class="badge ms-1" style="font-size: 10px; background-color: #336791 !important; color: white; cursor: pointer;" onclick="toggleDbType(event, ${pointId}, ${nextDbType})" title="Нажмите, чтобы переключить на MSSQL">PostgreSQL</span>`
@@ -597,6 +605,7 @@
                 <td>
                     <span class="badge bg-secondary">${p.pointCode}</span>
                     ${dbBadge}
+                    ${activeBtn}
                 </td>
                 <td>${lastTime}</td>
                 <td>${sizeMb}</td>
@@ -816,6 +825,20 @@
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalText;
+            }
+        }
+
+        async function togglePointActive(event, pointId) {
+            event.stopPropagation(); // Чтобы не открывалось модальное окно истории
+            try {
+                const res = await apiFetch(`/api/dashboard/points/${pointId}/toggle-active`, { method: "PATCH" });
+                if (res.ok) {
+                    await loadPointsStatus(); // Перезагружаем таблицу
+                } else {
+                    alert("Не удалось изменить статус мониторинга");
+                }
+            } catch (err) {
+                console.error(err);
             }
         }
     </script>

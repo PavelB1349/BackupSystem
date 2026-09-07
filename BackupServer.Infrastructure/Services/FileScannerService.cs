@@ -12,11 +12,16 @@ public class FileScannerService
 {
     private readonly AppDbContext _context;
     private readonly ILogger<FileScannerService> _logger;
+    private readonly TelegramService _telegramService; // 1. Добавляем сервис Telegram
 
-    public FileScannerService(AppDbContext context, ILogger<FileScannerService> logger)
+    public FileScannerService(
+        AppDbContext context,
+        ILogger<FileScannerService> logger,
+        TelegramService telegramService) // 2. Инжектим через конструктор
     {
         _context = context;
         _logger = logger;
+        _telegramService = telegramService;
     }
 
     public async Task ScanDirectoryAsync(string rootPath, CancellationToken cancellationToken = default)
@@ -104,5 +109,16 @@ public class FileScannerService
 
         _context.BackupLogs.Add(log);
         _logger.LogInformation("Зафиксирован бэкап: {FileName} | Статус: {Status}", fileName, status);
+
+        // 3. Отправка алертов при обнаружении битого бэкапа
+        if (status == BackupStatus.Corrupted)
+        {
+            await _telegramService.SendAlertAsync(
+                $"🔴 <b>ОШИБКА БЭКАПА!</b>\n\n" +
+                $"📍 <b>Точка:</b> {cityName} / {officeName} ({pointCode})\n" +
+                $"📁 <b>Файл:</b> <code>{fileName}</code>\n" +
+                $"⚠️ <b>Причина:</b> {errorMessage}"
+            );
+        }
     }
 }

@@ -32,6 +32,9 @@ builder.Services.AddOpenApi();
 builder.Services.AddScoped<FileScannerService>();
 
 builder.Services.AddHostedService<BackupRetentionWorker>();
+builder.Services.AddHostedService<BackupHealthWorker>();
+
+builder.Services.AddHttpClient<TelegramService>();
 
 var app = builder.Build();
 
@@ -58,5 +61,6 @@ using (var scope = app.Services.CreateScope())
     dbContext.Database.Migrate();
 }
 DynamicSettings.Init(app.Services.GetRequiredService<IConfiguration>());
+
 
 app.Run();
