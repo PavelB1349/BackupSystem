@@ -20,6 +20,13 @@ public static class BackupEngine
             Console.WriteLine("=======================================================================");
             Console.ResetColor();
         }
+        else
+        {            
+            // Случайная задержка от 0 до 30 минут, чтобы размазать отправку по времени
+            var random = new Random();
+            int jitterSeconds = random.Next(0, 30 * 60);
+            Thread.Sleep(jitterSeconds * 1000);
+        }
 
         try
         {
@@ -137,7 +144,7 @@ public static class BackupEngine
                     ftp.UploadFile(tempZipPath, $"{remoteDir}/{archiveFileName}", FtpRemoteExists.Overwrite, true, FtpVerify.None, progress);
                     ftp.Disconnect();
                 }
-            }, stepName: "передаче файла по FTP", maxRetries: 3, delaySeconds: 30);
+            }, stepName: "передаче файла по FTP", maxRetries: 3, initialDelaySeconds: 30);
 
             if (isManualRun) Console.WriteLine();
             if (File.Exists(tempZipPath)) File.Delete(tempZipPath);

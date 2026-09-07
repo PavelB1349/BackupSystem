@@ -13,7 +13,7 @@ public static class ConfigWizard
         Console.ResetColor();
 
         string city = ConsoleHelper.ReadRequiredString("Город (например, Алматы): ");
-        string office = ConsoleHelper.ReadRequiredString("Название обменника (например, SilkWay): ");
+        string office = ConsoleHelper.ReadRequiredString("Название обменника: ");
         string pointCode = ConsoleHelper.ReadRequiredString("Код кассы (например, OP1): ");
 
         Console.Write("\nТип СУБД (1 - MSSQL, 2 - PostgreSQL) [1]: ");
