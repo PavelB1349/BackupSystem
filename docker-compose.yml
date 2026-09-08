@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  backup-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: backup_monitoring_app
+    ports:
+      - "5000:8080" # Внешний порт 5000 мапится на внутренний 8080
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - FTP_PASSWORD=ваш_пароль_от_ftp_здесь
+      - TZ=Asia/Almaty
+    volumes:
+      - ./data:/app/data # Сохранение SQLite базы (backups.db) на диске хоста
+    restart: unless-stopped

@@ -28,3 +28,6 @@ appsettings.Local.json
 *.pfx
 *.key
 *.pem
+
+# Папка тома базы данных
+data/
