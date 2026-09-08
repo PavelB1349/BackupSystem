@@ -1,9 +1,10 @@
 using BackupServer.Api.BackgroundServices;
 using BackupServer.Api.Configuration;
+using BackupServer.Api.Services;
 using BackupServer.Infrastructure.Persistence;
 using BackupServer.Infrastructure.Services;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,11 +31,14 @@ builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
 builder.Services.AddScoped<FileScannerService>();
+builder.Services.AddScoped<FtpScannerService>();
 
 builder.Services.AddHostedService<BackupRetentionWorker>();
 builder.Services.AddHostedService<BackupHealthWorker>();
 
 builder.Services.AddHttpClient<TelegramService>();
+
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
@@ -53,6 +57,8 @@ app.UseDefaultFiles(); // Ищет index.html по умолчанию
 app.UseStaticFiles();  // Разрешает отдавать HTML/JS/CSS из папки wwwroot
 
 app.MapControllers();
+
+app.MapHealthChecks("/health");
 
 // Автоматическое создание/обновление базы данных при старте
 using (var scope = app.Services.CreateScope())

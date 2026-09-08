@@ -1,97 +1,69 @@
-﻿using System.Text;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using BackupServer.Api.Configuration;
 using BackupServer.Core.Enums;
 using BackupServer.Infrastructure.Persistence;
+using BackupServer.Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
-namespace BackupServer.Infrastructure.Services;
+namespace BackupServer.Api.BackgroundServices;
 
 public class BackupHealthWorker : BackgroundService
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<BackupHealthWorker> _logger;
     private readonly TelegramService _telegram;
-    private readonly IConfiguration _config;
 
     private DateTime _lastDailyReportDate = DateTime.MinValue;
     private DateTime _lastOverdueAlertDate = DateTime.MinValue;
-    private bool _isDiskAlertActive = false;
 
     public BackupHealthWorker(
         IServiceProvider serviceProvider,
         ILogger<BackupHealthWorker> logger,
-        TelegramService telegram,
-        IConfiguration config)
+        TelegramService telegram)
     {
         _serviceProvider = serviceProvider;
         _logger = logger;
         _telegram = telegram;
-        _config = config;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Пауза 30 секунд при старте для завершения инициализации сервера
         await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var now = DateTime.Now;
+                var now = TimeHelper.GetKazakhstanTime();
 
-                // 1. Проверка места на диске сервера
-                await CheckDiskSpaceAsync();
-
-                // 2. Утренний отчет в 09:00
+                // Утренний отчет в 09:00 по времени Казахстана
                 if (now.Hour == 9 && _lastDailyReportDate.Date != now.Date)
                 {
                     await SendDailyReportAsync();
-                    _lastDailyReportDate = now;
+                    _lastDailyReportDate = now.Date;
                 }
 
-                // 3. Дневной алерт по просроченным кассам в 15:00
+                // Алерт по просрочкам в 15:00 по времени Казахстана
                 if (now.Hour == 15 && _lastOverdueAlertDate.Date != now.Date)
                 {
                     await SendOverdueAlertAsync();
-                    _lastOverdueAlertDate = now;
+                    _lastOverdueAlertDate = now.Date;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[HealthWorker] Ошибка выполнения проверки состояния бэкапов");
+                _logger.LogError(ex, "[HealthWorker] Ошибка при проверке состояния бэкапов");
             }
 
-            // Проверка каждые 15 минут
             await Task.Delay(TimeSpan.FromMinutes(15), stoppingToken);
-        }
-    }
-
-    private async Task CheckDiskSpaceAsync()
-    {
-        try
-        {
-            var drive = new DriveInfo("C:\\");
-            long freeGb = drive.AvailableFreeSpace / 1024 / 1024 / 1024;
-
-            if (freeGb < 15 && !_isDiskAlertActive)
-            {
-                _isDiskAlertActive = true;
-                await _telegram.SendAlertAsync($"🚨 <b>КРИТИЧЕСКАЯ УГРОЗА!</b>\n\nЗаканчивается место на диске C:\\\nОсталось свободно: <b>{freeGb} ГБ</b>.\nПрием бэкапов под угрозой!");
-            }
-            else if (freeGb >= 15 && _isDiskAlertActive)
-            {
-                _isDiskAlertActive = false;
-                await _telegram.SendAlertAsync($"✅ <b>Место на диске освобождено.</b> Доступно: {freeGb} ГБ.");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning($"[HealthWorker] Не удалось проверить диск: {ex.Message}");
         }
     }
 
@@ -102,7 +74,6 @@ public class BackupHealthWorker : BackgroundService
 
         var thresholdOverdue = DateTime.Now.AddDays(-DynamicSettings.OverdueDays);
 
-        // Анализируем ТОЛЬКО АКТИВНЫЕ кассы (IsActive == true)
         var activePoints = await db.Points
             .Include(p => p.ExchangeOffice)
             .ThenInclude(e => e.City)
@@ -153,15 +124,11 @@ public class BackupHealthWorker : BackgroundService
         int success24h = await db.BackupLogs.CountAsync(l => l.FileCreatedAt >= yesterday && l.Status == BackupStatus.Success);
         int corrupted24h = await db.BackupLogs.CountAsync(l => l.FileCreatedAt >= yesterday && l.Status == BackupStatus.Corrupted);
 
-        long freeGb = 0;
-        try { freeGb = new DriveInfo("C:\\").AvailableFreeSpace / 1024 / 1024 / 1024; } catch { }
-
         await _telegram.SendAlertAsync(
             $"📊 <b>Утренняя сводка бэкапов</b>\n\n" +
             $"📡 Активных касс на мониторинге: <b>{activePointsCount}</b>\n" +
             $"🟢 Успешных копий за 24ч: <b>{success24h}</b>\n" +
-            $"🔴 Битых архивов за 24ч: <b>{corrupted24h}</b>\n" +
-            $"💾 Свободно на сервере: <b>{freeGb} ГБ</b>"
+            $"🔴 Битых архивов за 24ч: <b>{corrupted24h}</b>"
         );
     }
 }

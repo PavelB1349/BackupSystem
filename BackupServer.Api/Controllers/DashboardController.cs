@@ -1,10 +1,12 @@
 ﻿using BackupServer.Api.Configuration;
 using BackupServer.Api.DTOs;
+using BackupServer.Api.Services;
 using BackupServer.Core.Enums;
 using BackupServer.Infrastructure.Persistence;
+using BackupServer.Infrastructure.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authorization;
 
 namespace BackupServer.Api.Controllers;
 
@@ -192,158 +194,15 @@ public class DashboardController : ControllerBase
         return Ok(new { Message = $"СУБД для кассы успешно изменена на {dbType}" });
     }
 
-    // POST: api/dashboard/scan (СКАНИРОВАНИЕ С ОПРЕДЕЛЕНИЕМ ГОРОДА И СУБД)
+    // POST: api/dashboard/scan
     [HttpPost("scan")]
-    public async Task<IActionResult> ForceScan()
+    public async Task<IActionResult> ForceScan([FromServices] FtpScannerService scanner)
     {
         try
         {
-            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-
-            string ftpHost = _config["FtpSettings:Host"] ?? "ftp.a8pro.kz";
-            string ftpUser = _config["FtpSettings:User"] ?? "A8pro";
-            string ftpPass = Environment.GetEnvironmentVariable("FTP_PASSWORD") ?? _config["FtpSettings:Password"] ?? "";
-            string rootFolder = _config["FtpSettings:RootFolder"] ?? "Backups_V2";
-
-            int scannedFilesCount = 0;
-            int newFilesFound = 0;
-            int autoCreatedPointsCount = 0;
-
-            using (var ftp = new FluentFTP.FtpClient(ftpHost, ftpUser, ftpPass))
-            {
-                ftp.Encoding = System.Text.Encoding.GetEncoding("windows-1251");
-                ftp.Connect();
-
-                string targetFolder = ftp.DirectoryExists(rootFolder) ? rootFolder : ".";
-                var items = ftp.GetListing(targetFolder, FluentFTP.FtpListOption.Recursive | FluentFTP.FtpListOption.Modify);
-
-                foreach (var item in items)
-                {
-                    if (item.Type != FluentFTP.FtpObjectType.File || !item.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    scannedFilesCount++;
-
-                    bool exists = await _db.BackupLogs.AnyAsync(b => b.FileName == item.Name);
-                    if (exists) continue;
-
-                    var parts = Path.GetFileNameWithoutExtension(item.Name).Split('_');
-                    if (parts.Length >= 2)
-                    {
-                        string officeName = parts[0]; // PGTest
-                        string pointCode = parts[1];  // OP1
-
-                        // 🛢️ Проверяем наличие метки СУБД в названии файла (PG или SQL)
-                        bool hasDbTag = parts.Length >= 5 && (parts[2].Equals("PG", StringComparison.OrdinalIgnoreCase) || parts[2].Equals("SQL", StringComparison.OrdinalIgnoreCase));
-                        bool isPg = hasDbTag && parts[2].Equals("PG", StringComparison.OrdinalIgnoreCase);
-
-                        // 🏙️ Извлекаем город из пути FTP
-                        string detectedCityName = "Алматы";
-                        var pathSegments = item.FullName.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
-
-                        int rootIndex = Array.FindIndex(pathSegments, s => s.Equals("Backups_V2", StringComparison.OrdinalIgnoreCase));
-                        if (rootIndex >= 0 && pathSegments.Length > rootIndex + 1)
-                        {
-                            detectedCityName = pathSegments[rootIndex + 1];
-                        }
-
-                        // Ищем точку в базе
-                        var point = await _db.Points
-                            .Include(p => p.ExchangeOffice)
-                            .FirstOrDefaultAsync(p => p.Code == pointCode && p.ExchangeOffice.Name == officeName);
-
-                        // ⚡ АВТО-СОЗДАНИЕ
-                        if (point == null)
-                        {
-                            var city = await _db.Cities.FirstOrDefaultAsync(c => c.Name == detectedCityName);
-                            if (city == null)
-                            {
-                                city = new BackupServer.Core.Entities.City { Name = detectedCityName };
-                                _db.Cities.Add(city);
-                                await _db.SaveChangesAsync();
-                            }
-
-                            var office = await _db.ExchangeOffices
-                                .FirstOrDefaultAsync(e => e.Name == officeName);
-
-                            if (office == null)
-                            {
-                                office = new BackupServer.Core.Entities.ExchangeOffice
-                                {
-                                    Name = officeName,
-                                    CityId = city.Id
-                                };
-                                _db.ExchangeOffices.Add(office);
-                                await _db.SaveChangesAsync();
-                            }
-
-                            point = new BackupServer.Core.Entities.Point
-                            {
-                                Code = pointCode,
-                                ExchangeOfficeId = office.Id,
-                                IsActive = true,
-                                DbType = isPg ? DatabaseType.PostgreSql : DatabaseType.MsSql
-                            };
-                            _db.Points.Add(point);
-                            await _db.SaveChangesAsync();
-                            autoCreatedPointsCount++;
-                        }
-                        else if (hasDbTag)
-                        {
-                            // ⚡ ОБНОВЛЯЕМ СУБД существующей кассы при поступлении файла с тегом PG/SQL
-                            var detectedDbType = isPg ? DatabaseType.PostgreSql : DatabaseType.MsSql;
-                            if (point.DbType != detectedDbType)
-                            {
-                                point.DbType = detectedDbType;
-                            }
-                        }
-
-                        // 🕒 Парсинг даты (учитывает наличие/отсутствие метки СУБД)
-                        DateTime fileDate = DateTime.Now;
-                        string datePart = hasDbTag ? parts[3] : (parts.Length >= 3 ? parts[2] : "");
-                        string timePart = hasDbTag ? parts[4] : (parts.Length >= 4 ? parts[3] : "");
-
-                        if (!string.IsNullOrEmpty(datePart) && !string.IsNullOrEmpty(timePart) &&
-                            DateTime.TryParseExact($"{datePart}_{timePart}", "yyyy-MM-dd_HHmmss",
-                                System.Globalization.CultureInfo.InvariantCulture,
-                                System.Globalization.DateTimeStyles.None, out var parsedDate))
-                        {
-                            fileDate = parsedDate;
-                        }
-                        else if (item.Modified != DateTime.MinValue)
-                        {
-                            fileDate = item.Modified.ToLocalTime();
-                        }
-
-                        var log = new BackupServer.Core.Entities.BackupLog
-                        {
-                            PointId = point.Id,
-                            FileName = item.Name,
-                            FilePath = item.FullName,
-                            FileSizeBytes = item.Size,
-                            FileCreatedAt = fileDate,
-                            ProcessedAt = DateTime.Now,
-                            Status = BackupStatus.Success
-                        };
-
-                        _db.BackupLogs.Add(log);
-                        newFilesFound++;
-                    }
-                }
-
-                if (newFilesFound > 0 || _db.ChangeTracker.HasChanges())
-                {
-                    await _db.SaveChangesAsync();
-                }
-
-                ftp.Disconnect();
-            }
-
-            string message = $"Сканирование завершено. Новых бэкапов: {newFilesFound}.";
-            if (autoCreatedPointsCount > 0)
-            {
-                message += $" Зарегистрировано новых касс: {autoCreatedPointsCount}.";
-            }
+            var (newFiles, autoPoints) = await scanner.ScanFtpAsync();
+            string message = $"Сканирование завершено. Новых бэкапов: {newFiles}.";
+            if (autoPoints > 0) message += $" Зарегистрировано новых касс: {autoPoints}.";
 
             return Ok(new { Message = message });
         }
@@ -355,64 +214,11 @@ public class DashboardController : ControllerBase
 
     // POST: api/dashboard/cleanup
     [HttpPost("cleanup")]
-    public async Task<IActionResult> CleanupOldBackups()
+    public async Task<IActionResult> CleanupOldBackups([FromServices] FtpScannerService scanner)
     {
         try
         {
-            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-
-            string ftpHost = _config["FtpSettings:Host"] ?? "ftp.a8pro.kz";
-            string ftpUser = _config["FtpSettings:User"] ?? "A8pro";
-            string ftpPass = Environment.GetEnvironmentVariable("FTP_PASSWORD") ?? _config["FtpSettings:Password"] ?? "";
-
-            int maxBackups = DynamicSettings.MaxBackupsPerPoint;
-            int deletedFilesCount = 0;
-
-            using (var ftp = new FluentFTP.FtpClient(ftpHost, ftpUser, ftpPass))
-            {
-                ftp.Encoding = System.Text.Encoding.GetEncoding("windows-1251");
-                ftp.Connect();
-
-                var points = await _db.Points.ToListAsync();
-
-                foreach (var point in points)
-                {
-                    var logs = await _db.BackupLogs
-                        .Where(b => b.PointId == point.Id)
-                        .OrderByDescending(b => b.FileCreatedAt)
-                        .ToListAsync();
-
-                    if (logs.Count > maxBackups)
-                    {
-                        var logsToDelete = logs.Skip(maxBackups).ToList();
-                        foreach (var log in logsToDelete)
-                        {
-                            if (!string.IsNullOrEmpty(log.FilePath))
-                            {
-                                try
-                                {
-                                    ftp.DeleteFile(log.FilePath);
-                                    deletedFilesCount++;
-                                }
-                                catch
-                                {
-                                    // Файл физически отсутствует на FTP
-                                }
-                            }
-
-                            _db.BackupLogs.Remove(log);
-                        }
-                    }
-                }
-
-                if (deletedFilesCount > 0 || _db.ChangeTracker.HasChanges())
-                {
-                    await _db.SaveChangesAsync();
-                }
-
-                ftp.Disconnect();
-            }
-
+            int deletedFilesCount = await scanner.CleanupOldBackupsAsync();
             return Ok(new { Message = $"Ротация завершена. Удалено старых бэкапов с FTP: {deletedFilesCount}" });
         }
         catch (Exception ex)
@@ -456,4 +262,25 @@ public class DashboardController : ControllerBase
 
         return Ok(new { Message = "Настройки успешно сохранены!" });
     }
+
+    // DELETE: api/dashboard/points/{id}
+    [HttpDelete("points/{id}")]
+    public async Task<IActionResult> DeletePoint(int id)
+    {
+        var point = await _db.Points
+            .Include(p => p.BackupLogs)
+            .FirstOrDefaultAsync(p => p.Id == id);
+
+        if (point == null)
+            return NotFound(new { Message = $"Касса с ID {id} не найдена в базе" });
+
+        // Удаляем кассу и связанные логи
+        _db.BackupLogs.RemoveRange(point.BackupLogs);
+        _db.Points.Remove(point);
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new { Message = $"Касса {point.Code} и её история успешно удалены" });
+    }
+
 }

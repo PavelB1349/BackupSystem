@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Мониторинг Бэкапов 1С | A8pro</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🖥️</text></svg>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" rel="stylesheet">
     <style>
@@ -110,7 +111,7 @@
                 </button>
                 <button class="btn btn-primary btn-sm" onclick="loadDashboard()">
                     <i class="fa-solid fa-rotate-right me-1"></i> Обновить
-                </button>
+                </button>              
             </div>
         </div>
     </nav>
@@ -582,17 +583,19 @@
                 if (p.status === "Success") { badgeClass = "badge-success-custom"; statusText = "Сдан в срок"; }
                 else if (p.status === "Error") { badgeClass = "badge-danger-custom"; statusText = "Ошибка бэкапа"; }
                 else if (p.status === "Closed") { badgeClass = "badge-secondary-custom"; statusText = "Закрыта (>30 дн)"; }
-                else if (p.status === "Disabled" || !p.isActive) { badgeClass = "badge-secondary-custom"; statusText = "Отключена"; } // ⚡ Обработка отключенной кассы
+                else if (p.status === "Disabled" || !p.isActive) { badgeClass = "badge-secondary-custom"; statusText = "Отключена"; }
 
                 const pointId = p.pointId || p.id;
                 const isPg = p.dbType === 'PostgreSql';
                 const nextDbType = isPg ? 1 : 2;
 
-                // ⚡ ДОБАВЛЕНА КНОПКА АКТИВНОСТИ
                 const activeIcon = p.isActive
                     ? `<i class="fa-solid fa-bell text-success" title="Мониторинг включен"></i>`
                     : `<i class="fa-solid fa-bell-slash text-danger" title="Мониторинг отключен"></i>`;
+
                 const activeBtn = `<button class="btn btn-sm btn-light border p-1 ms-2" onclick="togglePointActive(event, ${pointId})" style="line-height: 1;">${activeIcon}</button>`;
+
+                const deleteBtn = `<button class="btn btn-outline-danger btn-sm p-1 ms-1" onclick="deletePoint(event, ${pointId}, '${p.pointCode}')" title="Удалить кассу" style="line-height: 1;"><i class="fa-solid fa-trash"></i></button>`;
 
                 const dbBadge = isPg
                     ? `<span class="badge ms-1" style="font-size: 10px; background-color: #336791 !important; color: white; cursor: pointer;" onclick="toggleDbType(event, ${pointId}, ${nextDbType})" title="Нажмите, чтобы переключить на MSSQL">PostgreSQL</span>`
@@ -606,6 +609,7 @@
                     <span class="badge bg-secondary">${p.pointCode}</span>
                     ${dbBadge}
                     ${activeBtn}
+                    ${deleteBtn}
                 </td>
                 <td>${lastTime}</td>
                 <td>${sizeMb}</td>
@@ -841,6 +845,31 @@
                 console.error(err);
             }
         }
+
+        async function deletePoint(event, id, code) {
+            event.stopPropagation(); // Предотвращает открытие модального окна истории кассы при клике на мусорку
+
+            if (!confirm(`Вы действительно хотите безвозвратно удалить кассу ${code} из базы?`)) {
+                return;
+            }
+
+            try {
+                const res = await apiFetch(`/api/dashboard/points/${id}`, { method: "DELETE" });
+                const data = await res.json();
+
+                if (res.ok) {
+                    alert(data.message);
+                    await loadDashboard(); // ⚡ Загрузка всего дашборда
+                } else {
+                    alert("Ошибка: " + data.message); 
+                }
+            } catch (err) {
+                alert("Ошибка при выполнении запроса на удаление");
+            }
+        }
+
+
+
     </script>
 </body>
 </html>
