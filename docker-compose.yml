@@ -13,5 +13,10 @@ services:
       - FTP_PASSWORD=ваш_пароль_от_ftp_здесь
       - TZ=Asia/Almaty
     volumes:
-      - ./data:/app/data # Сохранение SQLite базы (backups.db) на диске хоста
+      - ./data:/app/data
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -31,40 +31,24 @@ public class DashboardController : ControllerBase
         var thresholdOverdue = now.AddDays(-DynamicSettings.OverdueDays);
         var thresholdClosed = now.AddDays(-DynamicSettings.ClosedDays);
 
-        var activePoints = await _db.Points.Where(p => p.IsActive).ToListAsync();
-        int totalPoints = activePoints.Count;
+        // Вытаскиваем только последние логи для активных точек ОДНИМ запросом
+        var pointsData = await _db.Points
+            .Where(p => p.IsActive)
+            .Select(p => p.BackupLogs.OrderByDescending(b => b.FileCreatedAt).FirstOrDefault())
+            .ToListAsync();
 
+        int totalPoints = pointsData.Count;
         int backupsToday = 0;
         int missingToday = 0;
         int errorsToday = 0;
 
-        foreach (var point in activePoints)
+        foreach (var latestLog in pointsData)
         {
-            var latestLog = await _db.BackupLogs
-                .Where(b => b.PointId == point.Id)
-                .OrderByDescending(b => b.FileCreatedAt)
-                .FirstOrDefaultAsync();
-
-            if (latestLog == null)
-            {
-                missingToday++;
-            }
-            else if (latestLog.FileCreatedAt < thresholdClosed)
-            {
-                // Закрытая точка
-            }
-            else if (latestLog.Status != BackupStatus.Success)
-            {
-                errorsToday++;
-            }
-            else if (latestLog.FileCreatedAt >= thresholdOverdue)
-            {
-                backupsToday++;
-            }
-            else
-            {
-                missingToday++;
-            }
+            if (latestLog == null) missingToday++;
+            else if (latestLog.FileCreatedAt < thresholdClosed) { /* Закрытая точка */ }
+            else if (latestLog.Status != BackupStatus.Success) errorsToday++;
+            else if (latestLog.FileCreatedAt >= thresholdOverdue) backupsToday++;
+            else missingToday++;
         }
 
         return Ok(new DashboardStatsDto(totalPoints, backupsToday, missingToday, errorsToday));
@@ -73,62 +57,32 @@ public class DashboardController : ControllerBase
     [HttpGet("points")]
     public async Task<ActionResult<IEnumerable<PointStatusDto>>> GetPointsStatus()
     {
-        var now = DateTime.Now;
-        var thresholdOverdue = now.AddDays(-DynamicSettings.OverdueDays);
-        var thresholdClosed = now.AddDays(-DynamicSettings.ClosedDays);
+        var thresholdOverdue = DateTime.Now.AddDays(-DynamicSettings.OverdueDays);
+        var thresholdClosed = DateTime.Now.AddDays(-DynamicSettings.ClosedDays);
 
-        var points = await _db.Points
-        .Include(p => p.ExchangeOffice)
-        .ThenInclude(e => e.City)
-        .ToListAsync();
+        var pointsData = await _db.Points
+            .Include(p => p.ExchangeOffice)
+            .ThenInclude(e => e.City)
+            .Select(p => new
+            {
+                Point = p,
+                LatestLog = p.BackupLogs.OrderByDescending(b => b.FileCreatedAt).FirstOrDefault()
+            })
+            .ToListAsync();
 
-        var result = new List<PointStatusDto>();
-        foreach (var point in points)
+        var result = pointsData.Select(data =>
         {
-            var latestLog = await _db.BackupLogs
-                .Where(b => b.PointId == point.Id)
-                .OrderByDescending(b => b.FileCreatedAt)
-                .FirstOrDefaultAsync();
-
             string status = "Missing";
-
-            // Если касса отключена вручную
-            if (!point.IsActive)
+            if (!data.Point.IsActive) status = "Disabled";
+            else if (data.LatestLog != null)
             {
-                status = "Disabled";
-            }
-            else if (latestLog != null)
-            {
-                if (latestLog.FileCreatedAt < thresholdClosed)
-                {
-                    status = "Closed";
-                }
-                else if (latestLog.Status != BackupStatus.Success)
-                {
-                    status = "Error";
-                }
-                else if (latestLog.FileCreatedAt >= thresholdOverdue)
-                {
-                    status = "Success";
-                }
-                else
-                {
-                    status = "Missing";
-                }
+                if (data.LatestLog.FileCreatedAt < thresholdClosed) status = "Closed";
+                else if (data.LatestLog.Status != BackupStatus.Success) status = "Error";
+                else if (data.LatestLog.FileCreatedAt >= thresholdOverdue) status = "Success";
             }
 
-            result.Add(new PointStatusDto(
-                point.Id,
-                point.ExchangeOffice.City.Name,
-                point.ExchangeOffice.Name,
-                point.Code,
-                latestLog?.FileCreatedAt,
-                latestLog?.FileSizeBytes,
-                status,
-                point.IsActive,
-                point.DbType.ToString()
-            ));
-        }
+            return new PointStatusDto(data.Point.Id, data.Point.ExchangeOffice.City.Name, data.Point.ExchangeOffice.Name, data.Point.Code, data.LatestLog?.FileCreatedAt, data.LatestLog?.FileSizeBytes, status, data.Point.IsActive, data.Point.DbType.ToString());
+        });
 
         return Ok(result);
     }

@@ -86,6 +86,8 @@ public class FtpScannerService
                 point = new Point { Code = pointCode, ExchangeOffice = office, IsActive = true, DbType = isPg ? DatabaseType.PostgreSql : DatabaseType.MsSql };
                 _db.Points.Add(point);
                 autoCreatedPointsCount++;
+
+                await _db.SaveChangesAsync(token);// это нужно, чтобы получить Id для point перед добавлением BackupLog
             }
             else if (hasDbTag)
             {
