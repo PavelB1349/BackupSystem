@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System;
+using System.IO;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using BackupAgent.Helpers;
 
@@ -46,9 +48,16 @@ public static class ConfigWizard
         }
         else
         {
-            Console.Write("\nПароль пользователя 'sa' для MSSQL: ");
+            Console.Write("\nАдрес и экземпляр MS SQL Server [localhost\\SQLEXPRESS]: ");
+            string sqlServer = Console.ReadLine()?.Trim();
+            if (string.IsNullOrWhiteSpace(sqlServer))
+            {
+                sqlServer = @"localhost\SQLEXPRESS";
+            }
+
+            Console.Write("Пароль пользователя 'sa' для MSSQL: ");
             string saPass = ConsoleHelper.ReadPasswordSecurely();
-            mssqlConnStr = $"Server=localhost;Database={dbName};User Id=sa;Password={saPass};TrustServerCertificate=True;";
+            mssqlConnStr = $"Server={sqlServer};Database={dbName};User Id=sa;Password={saPass};TrustServerCertificate=True;";
         }
 
         Console.Write("\nПароль от FTP-сервера: ");

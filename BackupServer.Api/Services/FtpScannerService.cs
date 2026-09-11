@@ -57,8 +57,20 @@ public class FtpScannerService
             if (item.Type != FtpObjectType.File || !item.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            bool exists = await _db.BackupLogs.AnyAsync(b => b.FileName == item.Name, token);
-            if (exists) continue;
+            //bool exists = await _db.BackupLogs.AnyAsync(b => b.FileName == item.Name, token);
+            //if (exists) continue;
+
+            var existingLog = await _db.BackupLogs.FirstOrDefaultAsync(b => b.FileName == item.Name, token);
+            if (existingLog != null)
+            {
+                // Если бэкап уже в базе, но был 0 МБ — обновляем размер, когда он докачался
+                if (existingLog.FileSizeBytes == 0 && item.Size > 0)
+                {
+                    existingLog.FileSizeBytes = item.Size;
+                    newFilesFound++;
+                }
+                continue;
+            }
 
             var parts = Path.GetFileNameWithoutExtension(item.Name).Split('_');
             if (parts.Length < 2) continue;

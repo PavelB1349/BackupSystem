@@ -22,6 +22,7 @@ public class BackupHealthWorker : BackgroundService
     private readonly TelegramService _telegram;
 
     private DateTime _lastDailyReportDate = DateTime.MinValue;
+    private DateTime _lastEveningReportDate = DateTime.MinValue;
     private DateTime _lastOverdueAlertDate = DateTime.MinValue;
 
     public BackupHealthWorker(
@@ -44,18 +45,25 @@ public class BackupHealthWorker : BackgroundService
             {
                 var now = TimeHelper.GetKazakhstanTime();
 
-                // Утренний отчет в 09:00 по времени Казахстана
+                // Утренний отчет в 09:00
                 if (now.Hour == 9 && _lastDailyReportDate.Date != now.Date)
                 {
-                    await SendDailyReportAsync();
+                    await SendSummaryReportAsync("📊 <b>Утренняя сводка бэкапов</b>");
                     _lastDailyReportDate = now.Date;
                 }
 
-                // Алерт по просрочкам в 15:00 по времени Казахстана
+                // Алерт по просрочкам в 15:00
                 if (now.Hour == 15 && _lastOverdueAlertDate.Date != now.Date)
                 {
                     await SendOverdueAlertAsync();
                     _lastOverdueAlertDate = now.Date;
+                }
+
+                // Вечерний отчет в 22:00
+                if (now.Hour == 22 && _lastEveningReportDate.Date != now.Date)
+                {
+                    await SendSummaryReportAsync("🌆 <b>Вечерняя сводка бэкапов</b>");
+                    _lastEveningReportDate = now.Date;
                 }
             }
             catch (Exception ex)
@@ -72,7 +80,7 @@ public class BackupHealthWorker : BackgroundService
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var thresholdOverdue = DateTime.Now.AddDays(-DynamicSettings.OverdueDays);
+        var thresholdOverdue = TimeHelper.GetKazakhstanTime().AddDays(-DynamicSettings.OverdueDays);
 
         var activePoints = await db.Points
             .Include(p => p.ExchangeOffice)
@@ -106,28 +114,53 @@ public class BackupHealthWorker : BackgroundService
 
             if (overdueList.Count > 20)
             {
-                msg.AppendLine($"\n<i>...и еще {overdueList.Count - 20} касс. Посмотреть все можно в дашборде.</i>");
+                msg.AppendLine($"\n<i>...и еще {overdueList.Count - 20} касс.</i>");
             }
+            msg.AppendLine($"\n🔗 <a href=\"http://136.119.233.111:5000\">Открыть Дашборд Мониторинга</a>");
 
             await _telegram.SendAlertAsync(msg.ToString());
         }
     }
 
-    private async Task SendDailyReportAsync()
+    private async Task SendSummaryReportAsync(string title)
     {
         using var scope = _serviceProvider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var yesterday = DateTime.Now.AddDays(-1);
+        var currentTime = TimeHelper.GetKazakhstanTime();
+        var thresholdOverdue = currentTime.AddDays(-DynamicSettings.OverdueDays);
+        var yesterday = currentTime.AddDays(-1);
 
-        int activePointsCount = await db.Points.CountAsync(p => p.IsActive);
-        int success24h = await db.BackupLogs.CountAsync(l => l.FileCreatedAt >= yesterday && l.Status == BackupStatus.Success);
+        var activePoints = await db.Points.Where(p => p.IsActive).ToListAsync();
+        int activePointsCount = activePoints.Count;
+
+        int freshBackupsCount = 0;
+        int overdueCount = 0;
+
+        foreach (var point in activePoints)
+        {
+            var latestLog = await db.BackupLogs
+                .Where(b => b.PointId == point.Id)
+                .OrderByDescending(b => b.FileCreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (latestLog != null && latestLog.Status == BackupStatus.Success && latestLog.FileCreatedAt >= thresholdOverdue)
+            {
+                freshBackupsCount++;
+            }
+            else
+            {
+                overdueCount++;
+            }
+        }
+
         int corrupted24h = await db.BackupLogs.CountAsync(l => l.FileCreatedAt >= yesterday && l.Status == BackupStatus.Corrupted);
 
         await _telegram.SendAlertAsync(
-            $"📊 <b>Утренняя сводка бэкапов</b>\n\n" +
+            $"{title}\n\n" +
             $"📡 Активных касс на мониторинге: <b>{activePointsCount}</b>\n" +
-            $"🟢 Успешных копий за 24ч: <b>{success24h}</b>\n" +
+            $"🟢 С актуальными копиями: <b>{freshBackupsCount}</b>\n" +
+            $"🟡 Требуют внимания (просрочка): <b>{overdueCount}</b>\n" +
             $"🔴 Битых архивов за 24ч: <b>{corrupted24h}</b>"
         );
     }
