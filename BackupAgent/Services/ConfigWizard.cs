@@ -24,7 +24,8 @@ public static class ConfigWizard
 
         string dbName = ConsoleHelper.ReadRequiredString($"Имя базы данных 1С [{(isPg ? "ExchangePg" : "Exchange")}]: ");
 
-        string pgUser = "", pgPassEncrypted = "", mssqlConnStr = "", pgDumpPath = "";
+        string pgUser = "", pgPassEncrypted = "", pgDumpPath = "";
+        string sqlServer = "", sqlUser = "", sqlPassEncrypted = "";
 
         if (isPg)
         {
@@ -49,15 +50,17 @@ public static class ConfigWizard
         else
         {
             Console.Write("\nАдрес и экземпляр MS SQL Server [localhost\\SQLEXPRESS]: ");
-            string sqlServer = Console.ReadLine()?.Trim();
+            sqlServer = Console.ReadLine()?.Trim();
             if (string.IsNullOrWhiteSpace(sqlServer))
             {
                 sqlServer = @"localhost\SQLEXPRESS";
             }
 
-            Console.Write("Пароль пользователя 'sa' для MSSQL: ");
+            sqlUser = "sa"; // При необходимости можно вынести и в ввод пользователя
+
+            Console.Write($"Пароль пользователя '{sqlUser}' для MSSQL: ");
             string saPass = ConsoleHelper.ReadPasswordSecurely();
-            mssqlConnStr = $"Server={sqlServer};Database={dbName};User Id=sa;Password={saPass};TrustServerCertificate=True;";
+            sqlPassEncrypted = SecurityService.EncryptSecret(saPass);
         }
 
         Console.Write("\nПароль от FTP-сервера: ");
@@ -73,7 +76,9 @@ public static class ConfigWizard
                 ["OfficeName"] = office,
                 ["PointCode"] = pointCode,
                 ["DatabaseName"] = dbName,
-                ["ConnectionString"] = mssqlConnStr,
+                ["SqlServer"] = sqlServer,
+                ["SqlUser"] = sqlUser,
+                ["SqlPasswordEncrypted"] = sqlPassEncrypted,
                 ["PgDumpPath"] = pgDumpPath,
                 ["PgHost"] = "localhost",
                 ["PgPort"] = "5432",

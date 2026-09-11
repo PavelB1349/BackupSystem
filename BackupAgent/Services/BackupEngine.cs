@@ -78,10 +78,31 @@ public static class BackupEngine
             }
             else
             {
-                string connStr = configuration["AgentSettings:ConnectionString"];
-                using var connection = new SqlConnection(connStr);
+                // 1. Получаем настройки и расшифровываем пароль
+                string sqlServer = configuration["AgentSettings:SqlServer"] ?? @"localhost\SQLEXPRESS";
+                string sqlUser = configuration["AgentSettings:SqlUser"] ?? "sa";
+                string sqlPassEncrypted = configuration["AgentSettings:SqlPasswordEncrypted"];
+                string sqlPass = SecurityService.DecryptSecret(sqlPassEncrypted);
+
+                var builder = new SqlConnectionStringBuilder
+                {
+                    DataSource = sqlServer,
+                    InitialCatalog = dbName,
+                    UserID = sqlUser,
+                    Password = sqlPass,
+                    TrustServerCertificate = true,
+                    ConnectTimeout = 30
+                };
+
+                using var connection = new SqlConnection(builder.ConnectionString);
                 connection.Open();
-                using var command = new SqlCommand($@"BACKUP DATABASE [{dbName}] TO DISK = N'{tempBakPath}' WITH FORMAT, INIT;", connection);
+
+                // 🛡2. Безопасное экранирование имени базы данных
+                string safeDbName = $"[{dbName.Replace("]", "]]")}]";
+
+                string sqlQuery = $@"BACKUP DATABASE {safeDbName} TO DISK = N'{tempBakPath}' WITH FORMAT, INIT;";
+
+                using var command = new SqlCommand(sqlQuery, connection);
                 command.CommandTimeout = 3600;
                 command.ExecuteNonQuery();
             }
