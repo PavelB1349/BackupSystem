@@ -21,12 +21,15 @@ public static class BackupEngine
             Console.ResetColor();
         }
         else
-        {            
+        {
             // Случайная задержка от 0 до 30 минут, чтобы размазать отправку по времени
             var random = new Random();
             int jitterSeconds = random.Next(0, 30 * 60);
             Thread.Sleep(jitterSeconds * 1000);
         }
+
+        string tempBakPath = string.Empty;
+        string tempZipPath = string.Empty;
 
         try
         {
@@ -49,94 +52,104 @@ public static class BackupEngine
             string tempFolder = @"C:\BackupTemp";
             Directory.CreateDirectory(tempFolder);
 
-            string tempBakPath = Path.Combine(tempFolder, $"{dbName}_{timestamp}.bak");
+            // 0. Предварительная очистка мусора от бывших аварийных сбоев
+            CleanStaleTempFiles(tempFolder);
+
+            tempBakPath = Path.Combine(tempFolder, $"{dbName}_{timestamp}.bak");
             string dbPrefix = dbType.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase) ? "PG" : "SQL";
             string archiveFileName = $"{officeName}_{pointCode}_{dbPrefix}_{timestamp}.zip";
-            string tempZipPath = Path.Combine(tempFolder, archiveFileName);
+            tempZipPath = Path.Combine(tempFolder, archiveFileName);
 
-            Console.WriteLine($"\n[1/3] Создание дампа базы ({dbType})...");
-
-            if (dbType.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
+            try
             {
-                string pgPass = SecurityService.DecryptSecret(configuration["AgentSettings:PgPasswordEncrypted"]);
-                string pgDump = configuration["AgentSettings:PgDumpPath"];
-                string pgUser = configuration["AgentSettings:PgUser"];
+                Console.WriteLine($"\n[1/3] Создание дампа базы ({dbType})...");
 
-                var startInfo = new ProcessStartInfo
+                if (dbType.Equals("PostgreSql", StringComparison.OrdinalIgnoreCase))
                 {
-                    FileName = pgDump,
-                    Arguments = $"--host=localhost --port=5432 --username={pgUser} --format=custom --file=\"{tempBakPath}\" {dbName}",
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                startInfo.EnvironmentVariables["PGPASSWORD"] = pgPass;
+                    string pgPass = SecurityService.DecryptSecret(configuration["AgentSettings:PgPasswordEncrypted"]);
+                    string pgDump = configuration["AgentSettings:PgDumpPath"];
+                    string pgUser = configuration["AgentSettings:PgUser"];
 
-                using var process = Process.Start(startInfo);
-                process.WaitForExit();
-                if (process.ExitCode != 0) throw new Exception(process.StandardError.ReadToEnd());
-            }
-            else
-            {
-                // 1. Получаем настройки и расшифровываем пароль
-                string sqlServer = configuration["AgentSettings:SqlServer"] ?? @"localhost\SQLEXPRESS";
-                string sqlUser = configuration["AgentSettings:SqlUser"] ?? "sa";
-                string sqlPassEncrypted = configuration["AgentSettings:SqlPasswordEncrypted"];
-                string sqlPass = SecurityService.DecryptSecret(sqlPassEncrypted);
-
-                var builder = new SqlConnectionStringBuilder
-                {
-                    DataSource = sqlServer,
-                    InitialCatalog = dbName,
-                    UserID = sqlUser,
-                    Password = sqlPass,
-                    TrustServerCertificate = true,
-                    ConnectTimeout = 30
-                };
-
-                using var connection = new SqlConnection(builder.ConnectionString);
-                connection.Open();
-
-                // 🛡2. Безопасное экранирование имени базы данных
-                string safeDbName = $"[{dbName.Replace("]", "]]")}]";
-
-                string sqlQuery = $@"BACKUP DATABASE {safeDbName} TO DISK = N'{tempBakPath}' WITH FORMAT, INIT;";
-
-                using var command = new SqlCommand(sqlQuery, connection);
-                command.CommandTimeout = 3600;
-                command.ExecuteNonQuery();
-            }
-
-            // ШАГ 2: СЖАТИЕ В ZIP
-            var bakFileInfo = new FileInfo(tempBakPath);
-            long totalBakBytes = bakFileInfo.Length;
-
-            Console.WriteLine($"[2/3] Сжатие файла дампа ({totalBakBytes / 1024.0 / 1024.0:F1} МБ)...");
-
-            using (var zipStream = new FileStream(tempZipPath, FileMode.Create))
-            using (var zip = new ZipArchive(zipStream, ZipArchiveMode.Create))
-            {
-                var entry = zip.CreateEntry(bakFileInfo.Name, CompressionLevel.Optimal);
-                using var sourceStream = File.OpenRead(tempBakPath);
-                using var entryStream = entry.Open();
-
-                byte[] buffer = new byte[81920];
-                long compressedBytesRead = 0;
-                int bytesRead;
-
-                while ((bytesRead = sourceStream.Read(buffer, 0, buffer.Length)) > 0)
-                {
-                    entryStream.Write(buffer, 0, bytesRead);
-                    compressedBytesRead += bytesRead;
-
-                    if (isManualRun)
+                    var startInfo = new ProcessStartInfo
                     {
-                        ConsoleHelper.DrawProgressBar("Сжатие", compressedBytesRead, totalBakBytes);
+                        FileName = pgDump,
+                        Arguments = $"--host=localhost --port=5432 --username={pgUser} --format=custom --file=\"{tempBakPath}\" {dbName}",
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    startInfo.EnvironmentVariables["PGPASSWORD"] = pgPass;
+
+                    using var process = Process.Start(startInfo);
+                    process.WaitForExit();
+                    if (process.ExitCode != 0) throw new Exception(process.StandardError.ReadToEnd());
+                }
+                else
+                {
+                    // 1. Получаем настройки и расшифровываем пароль
+                    string sqlServer = configuration["AgentSettings:SqlServer"] ?? @"localhost\SQLEXPRESS";
+                    string sqlUser = configuration["AgentSettings:SqlUser"] ?? "sa";
+                    string sqlPassEncrypted = configuration["AgentSettings:SqlPasswordEncrypted"];
+                    string sqlPass = SecurityService.DecryptSecret(sqlPassEncrypted);
+
+                    var builder = new SqlConnectionStringBuilder
+                    {
+                        DataSource = sqlServer,
+                        InitialCatalog = dbName,
+                        UserID = sqlUser,
+                        Password = sqlPass,
+                        TrustServerCertificate = true,
+                        ConnectTimeout = 30
+                    };
+
+                    using var connection = new SqlConnection(builder.ConnectionString);
+                    connection.Open();
+
+                    // 🛡2. Безопасное экранирование имени базы данных
+                    string safeDbName = $"[{dbName.Replace("]", "]]")}]";
+
+                    string sqlQuery = $@"BACKUP DATABASE {safeDbName} TO DISK = N'{tempBakPath}' WITH FORMAT, INIT;";
+
+                    using var command = new SqlCommand(sqlQuery, connection);
+                    command.CommandTimeout = 3600;
+                    command.ExecuteNonQuery();
+                }
+
+                // ШАГ 2: СЖАТИЕ В ZIP
+                var bakFileInfo = new FileInfo(tempBakPath);
+                long totalBakBytes = bakFileInfo.Length;
+
+                Console.WriteLine($"[2/3] Сжатие файла дампа ({totalBakBytes / 1024.0 / 1024.0:F1} МБ)...");
+
+                using (var zipStream = new FileStream(tempZipPath, FileMode.Create))
+                using (var zip = new ZipArchive(zipStream, ZipArchiveMode.Create))
+                {
+                    var entry = zip.CreateEntry(bakFileInfo.Name, CompressionLevel.Optimal);
+                    using var sourceStream = File.OpenRead(tempBakPath);
+                    using var entryStream = entry.Open();
+
+                    byte[] buffer = new byte[81920];
+                    long compressedBytesRead = 0;
+                    int bytesRead;
+
+                    while ((bytesRead = sourceStream.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        entryStream.Write(buffer, 0, bytesRead);
+                        compressedBytesRead += bytesRead;
+
+                        if (isManualRun)
+                        {
+                            ConsoleHelper.DrawProgressBar("Сжатие", compressedBytesRead, totalBakBytes);
+                        }
                     }
                 }
+                if (isManualRun) Console.WriteLine();
             }
-            if (isManualRun) Console.WriteLine();
-            if (File.Exists(tempBakPath)) File.Delete(tempBakPath);
+            finally
+            {
+                // Исходный файл .bak удаляем сразу после архивации, независимо от того, удачно ли прошло сжатие
+                SafeDeleteFile(tempBakPath);
+            }
 
             // ШАГ 3: ОТПРАВКА НА FTP С RETRY POLICY
             var zipFileInfo = new FileInfo(tempZipPath);
@@ -168,7 +181,6 @@ public static class BackupEngine
             }, stepName: "передаче файла по FTP", maxRetries: 3, initialDelaySeconds: 30);
 
             if (isManualRun) Console.WriteLine();
-            if (File.Exists(tempZipPath)) File.Delete(tempZipPath);
         }
         catch (Exception ex)
         {
@@ -186,6 +198,68 @@ public static class BackupEngine
             {
                 Console.WriteLine("\nНажмите любую клавишу для выхода...");
                 Console.ReadKey();
+            }
+        }
+        finally
+        {
+            // Архив .zip удаляем всегда по окончании работы, даже если упала сеть или была ошибка FTP
+            SafeDeleteFile(tempZipPath);
+        }
+    }
+
+    private static void CleanStaleTempFiles(string tempFolder)
+    {
+        try
+        {
+            if (!Directory.Exists(tempFolder)) return;
+
+            var tempDir = new DirectoryInfo(tempFolder);
+
+                        // При старте очищаем ЛЮБЫЕ сторонние файлы и старые архивы из Temp
+            foreach (var file in tempDir.GetFiles())
+            {
+                SafeDeleteFile(file.FullName);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Warning] Ошибка при очистке старых файлов в Temp: {ex.Message}");
+        }
+    }
+
+    private static void SafeDeleteFile(string filePath)
+    {
+        if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            return;
+
+        // Небольшая задержка, чтобы Защитник Windows или ОС успели снять дескриптор с файла
+        Thread.Sleep(500);
+
+        for (int i = 0; i < 3; i++)// Пытаемся удалить файл до 3 раз
+        {
+            try
+            {
+                File.Delete(filePath);
+                break;
+            }
+            catch (IOException)
+            {
+                // Если файл заблокирован, ждем 1 секунду и пробуем снова
+                Thread.Sleep(1000);
+            }
+            catch (UnauthorizedAccessException)// Если файл заблокирован, ждем 1 секунду и пробуем снова
+            {
+                try
+                {
+                    File.SetAttributes(filePath, FileAttributes.Normal);
+                    File.Delete(filePath);
+                    break;
+                }
+                catch { }
+            }
+            catch
+            {
+                break;
             }
         }
     }
