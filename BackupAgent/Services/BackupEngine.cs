@@ -151,7 +151,7 @@ public static class BackupEngine
                 SafeDeleteFile(tempBakPath);
             }
 
-            // ШАГ 3: ОТПРАВКА НА FTP С RETRY POLICY И АТОМАРНЫМ ПЕРЕИМЕНОВАНИЕМ
+            // ШАГ 3: ОТПРАВКА НА FTP С RETRY POLICY И УНИКАЛЬНЫМИ ВРЕМЕННЫМИ ФАЙЛАМИ
             var zipFileInfo = new FileInfo(tempZipPath);
             long totalZipBytes = zipFileInfo.Length;
 
@@ -163,9 +163,9 @@ public static class BackupEngine
                 {
                     ftp.Encoding = Encoding.GetEncoding("windows-1251");
 
-                    // ⚙️ Настройка жестких таймаутов, чтобы не застревать при обрывах сети
-                    ftp.Config.ConnectTimeout = 15000;          // 15 сек на подключение
-                    ftp.Config.ReadTimeout = 20000;             // 20 сек на чтение
+                    // Настройка жестких таймаутов
+                    ftp.Config.ConnectTimeout = 15000;
+                    ftp.Config.ReadTimeout = 20000;
                     ftp.Config.DataConnectionConnectTimeout = 15000;
                     ftp.Config.DataConnectionReadTimeout = 20000;
 
@@ -174,7 +174,9 @@ public static class BackupEngine
                     string remoteDir = $"/{ftpRootFolder}/{cityName}/{officeName}";
                     ftp.CreateDirectory(remoteDir);
 
-                    string remoteTmpPath = $"{remoteDir}/{archiveFileName}.tmp";
+                    // 💡 Генерируем уникальное имя временного файла под КАЖДУЮ попытку
+                    string uniqueTmpName = $"{archiveFileName}.{Guid.NewGuid().ToString("N")[..6]}.tmp";
+                    string remoteTmpPath = $"{remoteDir}/{uniqueTmpName}";
                     string remoteFinalPath = $"{remoteDir}/{archiveFileName}";
 
                     Action<FtpProgress> progress = p =>
@@ -185,16 +187,10 @@ public static class BackupEngine
                         }
                     };
 
-                    // 🧹 Если от прошлого сорванного соединения на FTP остался недогруженный .tmp — счищаем его
-                    if (ftp.FileExists(remoteTmpPath))
-                    {
-                        try { ftp.DeleteFile(remoteTmpPath); } catch { }
-                    }
-
-                    // 1. Загружаем во временный файл .tmp
+                    // 1. Загружаем во временный уникальный файл
                     ftp.UploadFile(tempZipPath, remoteTmpPath, FtpRemoteExists.Overwrite, true, FtpVerify.None, progress);
 
-                    // 2. Сверяем точный размер файла на FTP с локальным
+                    // 2. Сверяем размер файла на FTP с локальным
                     long remoteSize = ftp.GetFileSize(remoteTmpPath);
                     if (remoteSize != totalZipBytes)
                     {
@@ -202,7 +198,7 @@ public static class BackupEngine
                         throw new Exception($"Размер файла на FTP ({remoteSize} Б) не совпадает с локальным ({totalZipBytes} Б). Передача прервана.");
                     }
 
-                    // 3. Атомарно переименовываем .tmp -> .zip
+                    // 3. Атомарно переименовываем уникальный .tmp в финальный .zip
                     if (ftp.FileExists(remoteFinalPath))
                     {
                         try { ftp.DeleteFile(remoteFinalPath); } catch { }
