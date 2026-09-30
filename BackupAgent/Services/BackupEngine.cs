@@ -162,6 +162,13 @@ public static class BackupEngine
                 using (var ftp = new FtpClient(ftpHost, ftpUser, ftpPass))
                 {
                     ftp.Encoding = Encoding.GetEncoding("windows-1251");
+
+                    // ⚙️ Настройка жестких таймаутов, чтобы не застревать при обрывах сети
+                    ftp.Config.ConnectTimeout = 15000;          // 15 сек на подключение
+                    ftp.Config.ReadTimeout = 20000;             // 20 сек на чтение
+                    ftp.Config.DataConnectionConnectTimeout = 15000;
+                    ftp.Config.DataConnectionReadTimeout = 20000;
+
                     ftp.Connect();
 
                     string remoteDir = $"/{ftpRootFolder}/{cityName}/{officeName}";
@@ -178,6 +185,12 @@ public static class BackupEngine
                         }
                     };
 
+                    // 🧹 Если от прошлого сорванного соединения на FTP остался недогруженный .tmp — счищаем его
+                    if (ftp.FileExists(remoteTmpPath))
+                    {
+                        try { ftp.DeleteFile(remoteTmpPath); } catch { }
+                    }
+
                     // 1. Загружаем во временный файл .tmp
                     ftp.UploadFile(tempZipPath, remoteTmpPath, FtpRemoteExists.Overwrite, true, FtpVerify.None, progress);
 
@@ -192,7 +205,7 @@ public static class BackupEngine
                     // 3. Атомарно переименовываем .tmp -> .zip
                     if (ftp.FileExists(remoteFinalPath))
                     {
-                        ftp.DeleteFile(remoteFinalPath);
+                        try { ftp.DeleteFile(remoteFinalPath); } catch { }
                     }
                     ftp.Rename(remoteTmpPath, remoteFinalPath);
 
