@@ -151,7 +151,7 @@ public static class BackupEngine
                 SafeDeleteFile(tempBakPath);
             }
 
-            // ШАГ 3: ОТПРАВКА НА FTP С RETRY POLICY
+            // ШАГ 3: ОТПРАВКА НА FTP С RETRY POLICY И АТОМАРНЫМ ПЕРЕИМЕНОВАНИЕМ
             var zipFileInfo = new FileInfo(tempZipPath);
             long totalZipBytes = zipFileInfo.Length;
 
@@ -167,6 +167,9 @@ public static class BackupEngine
                     string remoteDir = $"/{ftpRootFolder}/{cityName}/{officeName}";
                     ftp.CreateDirectory(remoteDir);
 
+                    string remoteTmpPath = $"{remoteDir}/{archiveFileName}.tmp";
+                    string remoteFinalPath = $"{remoteDir}/{archiveFileName}";
+
                     Action<FtpProgress> progress = p =>
                     {
                         if (isManualRun)
@@ -175,7 +178,24 @@ public static class BackupEngine
                         }
                     };
 
-                    ftp.UploadFile(tempZipPath, $"{remoteDir}/{archiveFileName}", FtpRemoteExists.Overwrite, true, FtpVerify.None, progress);
+                    // 1. Загружаем во временный файл .tmp
+                    ftp.UploadFile(tempZipPath, remoteTmpPath, FtpRemoteExists.Overwrite, true, FtpVerify.None, progress);
+
+                    // 2. Сверяем точный размер файла на FTP с локальным
+                    long remoteSize = ftp.GetFileSize(remoteTmpPath);
+                    if (remoteSize != totalZipBytes)
+                    {
+                        try { ftp.DeleteFile(remoteTmpPath); } catch { }
+                        throw new Exception($"Размер файла на FTP ({remoteSize} Б) не совпадает с локальным ({totalZipBytes} Б). Передача прервана.");
+                    }
+
+                    // 3. Атомарно переименовываем .tmp -> .zip
+                    if (ftp.FileExists(remoteFinalPath))
+                    {
+                        ftp.DeleteFile(remoteFinalPath);
+                    }
+                    ftp.Rename(remoteTmpPath, remoteFinalPath);
+
                     ftp.Disconnect();
                 }
             }, stepName: "передаче файла по FTP", maxRetries: 3, initialDelaySeconds: 30);

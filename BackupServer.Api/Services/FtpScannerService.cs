@@ -41,7 +41,7 @@ public class FtpScannerService
         int newFilesFound = 0;
         int autoCreatedPointsCount = 0;
 
-        // 1. Обычный синхронный вызов FTP (как у тебя и работало)
+        // 1. Обычный синхронный вызов FTP
         using var ftp = new FtpClient(ftpHost, ftpUser, ftpPass);
         ftp.Encoding = Encoding.GetEncoding("windows-1251");
         ftp.Connect();
@@ -53,6 +53,16 @@ public class FtpScannerService
         foreach (var item in items)
         {
             if (token.IsCancellationRequested) break;
+
+            // 🧹 Авто-чистка: если это .tmp файл и он лежит на FTP дольше 24 часов — удаляем его
+            if (item.Type == FtpObjectType.File && item.Name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+            {
+                if (item.Modified < DateTime.UtcNow.AddHours(-24))
+                {
+                    try { ftp.DeleteFile(item.FullName); } catch { }
+                }
+                continue;
+            }
 
             if (item.Type != FtpObjectType.File || !item.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 continue;
